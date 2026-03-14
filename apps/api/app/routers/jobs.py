@@ -163,6 +163,8 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
 
     from models import JobRun
     from datetime import timezone
+    from sqlalchemy import select, func
+    from models import Asset
 
     def _cancelled() -> bool:
         return job_id in _CANCELLED_JOBS
@@ -178,6 +180,25 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
                 if status == "cancelled":
                     j.finished_at = datetime.now(timezone.utc)
 
+    def _count_assets_in_scope(scope: str | None) -> int:
+        with get_session() as s:
+            q = select(func.count(Asset.id)).where(Asset.is_missing == False)  # noqa: E712
+            if scope:
+                q = q.where(
+                    (Asset.canonical_path == scope) | (Asset.canonical_path.like(f"{scope}/%"))
+                )
+            return s.scalar(q) or 0
+
+    async def _ensure_assets_for_scope(scope: str | None) -> None:
+        if not scope:
+            return
+        if _count_assets_in_scope(scope) > 0:
+            return
+        from scanner import scan_source_root
+        _update("running", f"No indexed assets found in {scope}. Scanning folder first…")
+        result = await asyncio.to_thread(scan_source_root, scope)
+        _update("running", f"Scan done — {result.new} new, {result.updated} updated, {result.found} found. Continuing…")
+
     _update("running", f"Starting {req.type.value}…")
     try:
         scoped = str(Path(req.source_root).expanduser().resolve()) if req.source_root else None
@@ -187,6 +208,7 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
             _update("done", f"Scan done — {result.new} new, {result.updated} updated, {result.found} found")
         elif req.type == JobType.enrich:
             from enrichment import enrich_all_pending
+            await _ensure_assets_for_scope(scoped)
             done, errors, cancelled = await asyncio.to_thread(enrich_all_pending, 200, scoped, _cancelled)
             _update("cancelled" if cancelled else "done", f"Enriched {done} assets ({errors} errors)")
         elif req.type == JobType.extract:
@@ -194,6 +216,7 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
             sys.path.insert(0, str(_repo / "packages" / "models"))
             from image_extractor import extract_all_pending
             from app.core.config import settings
+            await _ensure_assets_for_scope(scoped)
             stats = await asyncio.to_thread(
                 extract_all_pending,
                 settings.model_provider,
@@ -214,6 +237,7 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
         elif req.type == JobType.reprocess:
             from thumbnails import generate_all_pending
             from app.core.config import settings
+            await _ensure_assets_for_scope(scoped)
             stats = await asyncio.to_thread(generate_all_pending, settings.derivative_cache_root, scoped, _cancelled)
             _update(
                 "cancelled" if stats.get("cancelled") else "done",

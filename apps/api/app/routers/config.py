@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -35,6 +36,18 @@ class ConfigSnapshot(BaseModel):
     model_provider: str
     model_name: str
     api_version: str = "0.1.0"
+
+
+class PurgeMetadataRequest(BaseModel):
+    confirm_text: str
+
+
+class PurgeMetadataResponse(BaseModel):
+    status: str
+    tables_reset: bool
+    cache_root: str
+    cache_cleared: bool
+    debug_cleared: bool
 
 
 @router.get("", response_model=ConfigSnapshot)
@@ -166,3 +179,41 @@ async def scan_source_root(body: SourceRootIn, background_tasks: BackgroundTasks
 
     background_tasks.add_task(_run)
     return {"job_id": job_id, "status": "queued", "source_root": str(p)}
+
+
+@router.post("/purge-metadata", response_model=PurgeMetadataResponse)
+async def purge_metadata(body: PurgeMetadataRequest) -> PurgeMetadataResponse:
+    from app.core.config import settings
+    from app.core.db import get_engine
+    from models import Base
+
+    expected = "PURGE ALL METADATA"
+    if body.confirm_text.strip() != expected:
+        raise HTTPException(status_code=422, detail=f'Type exactly "{expected}" to continue')
+
+    engine = get_engine()
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    cache_root = Path(settings.derivative_cache_root).expanduser()
+    cache_cleared = False
+    if cache_root.exists():
+        shutil.rmtree(cache_root, ignore_errors=True)
+        cache_cleared = True
+    cache_root.mkdir(parents=True, exist_ok=True)
+
+    repo_root = Path(__file__).parents[4]
+    debug_root = repo_root / "var" / "ai_debug"
+    debug_cleared = False
+    if debug_root.exists():
+        shutil.rmtree(debug_root, ignore_errors=True)
+        debug_cleared = True
+    debug_root.mkdir(parents=True, exist_ok=True)
+
+    return PurgeMetadataResponse(
+        status="purged",
+        tables_reset=True,
+        cache_root=str(cache_root),
+        cache_cleared=cache_cleared,
+        debug_cleared=debug_cleared,
+    )

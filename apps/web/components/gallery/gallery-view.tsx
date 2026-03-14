@@ -40,12 +40,14 @@ export function GalleryView() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [filterOpen, setFilterOpen] = useState(true);
   const [typeFilter, setTypeFilter] = useState<string | undefined>();
+  const [matchMode, setMatchMode] = useState<"any" | "all">("any");
   const [hasOcr, setHasOcr] = useState(false);
   const [hasGps, setHasGps] = useState(false);
   const [hasAi, setHasAi] = useState(false);
   const [reviewBucket, setReviewBucket] = useState<string | undefined>();
   const [folderFilter, setFolderFilter] = useState<string | undefined>();
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [focusId, setFocusId] = useState<string | null>(null);
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "refresh") {
@@ -64,6 +66,7 @@ export function GalleryView() {
           scene: sceneFilter || undefined,
           place: placeFilter || undefined,
           object: objectFilter || undefined,
+          match: matchMode,
           type: typeFilter,
           folder: folderFilter,
           has_ocr: hasOcr || undefined,
@@ -77,6 +80,7 @@ export function GalleryView() {
           scene: sceneFilter || undefined,
           place: placeFilter || undefined,
           object: objectFilter || undefined,
+          match: matchMode,
           type: typeFilter,
           folder: folderFilter,
           has_ocr: hasOcr || undefined,
@@ -85,6 +89,7 @@ export function GalleryView() {
           review_bucket: reviewBucket,
         }),
         api.assets.folders({
+          match: matchMode,
           type: typeFilter,
         }),
       ]);
@@ -98,7 +103,7 @@ export function GalleryView() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [deferredAiTextFilter, deferredQuery, hasAi, hasGps, hasOcr, objectFilter, placeFilter, reviewBucket, sceneFilter, typeFilter, folderFilter]);
+  }, [deferredAiTextFilter, deferredQuery, hasAi, hasGps, hasOcr, matchMode, objectFilter, placeFilter, reviewBucket, sceneFilter, typeFilter, folderFilter]);
 
   function resetFilters() {
     setQuery("");
@@ -107,6 +112,7 @@ export function GalleryView() {
     setPlaceFilter("");
     setObjectFilter("");
     setTypeFilter(undefined);
+    setMatchMode("any");
     setHasOcr(false);
     setHasGps(false);
     setHasAi(false);
@@ -118,6 +124,21 @@ export function GalleryView() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setFocusId(params.get("focus"));
+  }, []);
+
+  useEffect(() => {
+    if (!focusId || items.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(`[data-asset-id="${focusId}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusId, items]);
+
   const topTags = findTopTags(items);
   const activeFilterCount = [
     query,
@@ -126,6 +147,7 @@ export function GalleryView() {
     placeFilter,
     objectFilter,
     typeFilter,
+    matchMode !== "any" ? matchMode : "",
     hasOcr ? "ocr" : "",
     hasGps ? "gps" : "",
     hasAi ? "ai" : "",
@@ -245,7 +267,9 @@ export function GalleryView() {
           hasGps={hasGps}
           hasAi={hasAi}
           reviewBucket={reviewBucket}
+          matchMode={matchMode}
           onTypeChange={setTypeFilter}
+          onMatchModeChange={setMatchMode}
           onAiTextChange={setAiTextFilter}
           onSceneChange={setSceneFilter}
           onPlaceChange={setPlaceFilter}
@@ -273,7 +297,12 @@ export function GalleryView() {
           <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
             <aside className="space-y-4">
               <FolderPanel folders={allFolders} folderFilter={folderFilter} onFolderChange={setFolderFilter} />
-              <TagPanel tags={topTags} onTagClick={(tag) => setQuery(tag)} />
+              <TagPanel
+                query={query}
+                tags={topTags}
+                onTagToggle={(tag) => setQuery(toggleTerm(query, tag))}
+                onClearSelection={() => setQuery(clearTagTerms(query, topTags))}
+              />
             </aside>
 
             <div className="space-y-4">
@@ -291,7 +320,7 @@ export function GalleryView() {
               {viewMode === "grid" ? (
                 <div className={cn("gap-3 space-y-3", ZOOM_COLS[zoom])}>
                   {items.map((asset) => (
-                    <AssetCard key={asset.id} asset={asset} compact={zoom >= 3} />
+                    <AssetCard key={asset.id} asset={asset} compact={zoom >= 3} focused={focusId === asset.id} />
                   ))}
                 </div>
               ) : (
@@ -341,7 +370,7 @@ function FolderPanel({
         >
           All folders
         </button>
-        <div className="max-h-[18rem] overflow-auto pr-1">
+        <div className="max-h-[34rem] overflow-auto pr-1">
           <div className="space-y-1.5">
             {visibleFolders.map((folder) => (
               <button
@@ -351,8 +380,9 @@ function FolderPanel({
                   "flex w-full items-center justify-between gap-3 rounded-[1rem] px-3 py-2 text-left text-[12px] transition-colors hover:bg-[hsl(var(--surface-raised))]",
                   folderFilter === folder.path && "bg-[hsl(var(--accent-strong))] text-[hsl(var(--accent-foreground))]"
                 )}
+                title={folder.path}
               >
-                <span className="truncate font-mono">{folder.path}</span>
+                <span className="truncate font-mono" style={{ paddingLeft: `${Math.max(folder.path.split("/").length - 1, 0)}ch` }}>{folder.path}</span>
                 <span className="text-[10px] opacity-70">{folder.count}</span>
               </button>
             ))}
@@ -363,16 +393,41 @@ function FolderPanel({
   );
 }
 
-function TagPanel({ tags, onTagClick }: { tags: string[]; onTagClick: (tag: string) => void }) {
+function TagPanel({
+  tags,
+  query,
+  onTagToggle,
+  onClearSelection,
+}: {
+  tags: string[];
+  query: string;
+  onTagToggle: (tag: string) => void;
+  onClearSelection: () => void;
+}) {
+  const activeTerms = splitTerms(query);
   return (
     <div className="rounded-[1.5rem] border border-[hsl(var(--border))] bg-[hsl(var(--surface))] p-4 shadow-[0_24px_80px_-66px_rgba(0,0,0,0.5)]">
-      <div className="mb-3 text-[10px] uppercase tracking-[0.22em] text-[hsl(var(--muted))]">Popular tags</div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-[hsl(var(--muted))]">Popular tags</div>
+        <button
+          onClick={onClearSelection}
+          disabled={activeTerms.length === 0}
+          className="rounded-full border border-[hsl(var(--border))] px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-[hsl(var(--muted))] transition-colors hover:text-[hsl(var(--foreground))] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Clear selection
+        </button>
+      </div>
       <div className="flex flex-wrap gap-2">
         {tags.length > 0 ? tags.map((tag) => (
           <button
             key={tag}
-            onClick={() => onTagClick(tag)}
-            className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--surface-raised))] px-3 py-1 text-[11px]"
+            onClick={() => onTagToggle(tag)}
+            className={cn(
+              "rounded-full border px-3 py-1 text-[11px]",
+              activeTerms.includes(tag.toLowerCase())
+                ? "border-transparent bg-[hsl(var(--accent-strong))] text-[hsl(var(--accent-foreground))]"
+                : "border-[hsl(var(--border))] bg-[hsl(var(--surface-raised))]"
+            )}
           >
             {tag}
           </button>
@@ -447,4 +502,27 @@ function findTopTags(items: AssetListItem[]) {
     }
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([tag]) => tag);
+}
+
+function splitTerms(value: string) {
+  return value
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function toggleTerm(value: string, term: string) {
+  const normalized = term.trim().toLowerCase();
+  const next = splitTerms(value);
+  const updated = next.includes(normalized)
+    ? next.filter((item) => item !== normalized)
+    : [...next, normalized];
+  return updated.join(", ");
+}
+
+function clearTagTerms(value: string, tags: string[]) {
+  const selected = new Set(tags.map((tag) => tag.trim().toLowerCase()));
+  return splitTerms(value)
+    .filter((term) => !selected.has(term))
+    .join(", ");
 }

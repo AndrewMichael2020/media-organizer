@@ -225,6 +225,9 @@ export default function SettingsPage() {
     db: "loading",
   });
   const [cfg, setCfg] = useState<ConfigSnapshot | null>(null);
+  const [purgeText, setPurgeText] = useState("");
+  const [purging, setPurging] = useState(false);
+  const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
 
   const loadConfig = () => {
     api.config.get().then(setCfg).catch(() => {});
@@ -236,6 +239,23 @@ export default function SettingsPage() {
       .catch(() => setHealth({ api: "error", db: "error" }));
     loadConfig();
   }, []);
+
+  async function handlePurgeMetadata() {
+    setPurging(true);
+    setPurgeMessage(null);
+    try {
+      const result = await api.config.purgeMetadata(purgeText);
+      setPurgeText("");
+      setPurgeMessage(
+        `Metadata purged. Cache cleared: ${result.cache_cleared ? "yes" : "no"} · Debug files cleared: ${result.debug_cleared ? "yes" : "no"}`
+      );
+      loadConfig();
+    } catch (error: unknown) {
+      setPurgeMessage(error instanceof Error ? error.message : "Purge failed");
+    } finally {
+      setPurging(false);
+    }
+  }
 
   return (
     <div className="max-w-2xl mx-auto px-8 py-10 space-y-10">
@@ -290,6 +310,43 @@ export default function SettingsPage() {
           <InfoRow label="Provider" value={cfg?.model_provider ?? "—"} />
           <InfoRow label="Model" value={cfg?.model_name ?? "—"} />
           <InfoRow label="Configured via" value="config/local.yaml" />
+        </div>
+      </div>
+
+      <div>
+        <SectionLabel>Danger Zone</SectionLabel>
+        <div className="rounded-lg border border-red-200 bg-red-50/60 p-4 dark:border-red-900 dark:bg-red-950/30">
+          <p className="text-[12px] leading-relaxed text-[hsl(var(--foreground))]">
+            Purge all metadata, extracted AI data, jobs, thumbnails, keyframes, and cached debug files. Original photos
+            and videos stay in place.
+          </p>
+          <p className="mt-2 text-[11px] text-[hsl(var(--muted-foreground))]">
+            Type <span className="font-mono">PURGE ALL METADATA</span> to confirm.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <input
+              type="text"
+              value={purgeText}
+              onChange={(event) => setPurgeText(event.target.value)}
+              placeholder="PURGE ALL METADATA"
+              className="flex-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface))] px-3 py-2 text-[12px] font-mono outline-none"
+            />
+            <button
+              onClick={handlePurgeMetadata}
+              disabled={purgeText.trim() !== "PURGE ALL METADATA" || purging}
+              className={cn(
+                "rounded-md px-4 py-2 text-[11px] font-medium transition-colors",
+                purgeText.trim() === "PURGE ALL METADATA" && !purging
+                  ? "bg-red-600 text-white hover:bg-red-700"
+                  : "bg-[hsl(var(--surface-raised))] text-[hsl(var(--muted))] cursor-not-allowed"
+              )}
+            >
+              {purging ? "Purging..." : "Purge all metadata"}
+            </button>
+          </div>
+          {purgeMessage && (
+            <p className="mt-2 text-[11px] text-[hsl(var(--muted-foreground))]">{purgeMessage}</p>
+          )}
         </div>
       </div>
 

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import Text, cast, exists, or_, select, update
+from sqlalchemy import Text, and_, cast, exists, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 # Add db package to path for sibling import
@@ -98,6 +98,7 @@ def _apply_asset_filters(
     has_gps: Optional[bool] = None,
     has_ai: Optional[bool] = None,
     review_bucket: Optional[str] = None,
+    match_mode: str = "any",
 ):
     q = select(Asset).where(Asset.is_missing == False)  # noqa: E712
     if media_type:
@@ -140,107 +141,132 @@ def _apply_asset_filters(
             )
         )
 
-    if search and search.strip():
-        term = search.strip()
-        pattern = f"%{term}%"
+    def _terms(value: Optional[str]) -> list[str]:
+        if not value or not value.strip():
+            return []
+        return [part.strip() for part in value.split(",") if part.strip()]
+
+    def _combine(clauses):
+        if not clauses:
+            return None
+        return and_(*clauses) if match_mode == "all" else or_(*clauses)
+
+    search_terms = _terms(search)
+    if search_terms:
+        clauses = []
+        for term in search_terms:
+            pattern = f"%{term}%"
+            clauses.append(
+                or_(
+                    Asset.filename.ilike(pattern),
+                    Asset.canonical_path.ilike(pattern),
+                    exists(
+                        select(OcrDocument.id).where(
+                            OcrDocument.asset_id == Asset.id,
+                            OcrDocument.full_text.ilike(pattern),
+                        )
+                    ),
+                    exists(
+                        select(SceneSummary.id).where(
+                            SceneSummary.asset_id == Asset.id,
+                            or_(
+                                SceneSummary.scene_type.ilike(pattern),
+                                SceneSummary.setting.ilike(pattern),
+                                SceneSummary.time_of_day.ilike(pattern),
+                                SceneSummary.weather.ilike(pattern),
+                                SceneSummary.description.ilike(pattern),
+                            ),
+                        )
+                    ),
+                    exists(
+                        select(ObjectDetection.id).where(
+                            ObjectDetection.asset_id == Asset.id,
+                            ObjectDetection.label.ilike(pattern),
+                        )
+                    ),
+                    exists(
+                        select(PlaceCandidate.id).where(
+                            PlaceCandidate.asset_id == Asset.id,
+                            or_(
+                                PlaceCandidate.name.ilike(pattern),
+                                PlaceCandidate.country.ilike(pattern),
+                                PlaceCandidate.region.ilike(pattern),
+                                PlaceCandidate.place_type.ilike(pattern),
+                            ),
+                        )
+                    ),
+                )
+            )
+        q = q.where(_combine(clauses))
+
+    ai_terms = _terms(ai_text)
+    if ai_terms:
         q = q.where(
-            or_(
-                Asset.filename.ilike(pattern),
-                Asset.canonical_path.ilike(pattern),
+            _combine([
                 exists(
-                    select(OcrDocument.id).where(
-                        OcrDocument.asset_id == Asset.id,
-                        OcrDocument.full_text.ilike(pattern),
+                    select(ExtractionRun.id).where(
+                        ExtractionRun.asset_id == Asset.id,
+                        or_(
+                            cast(ExtractionRun.raw_output, Text).ilike(f"%{term}%"),
+                            ExtractionRun.error_message.ilike(f"%{term}%"),
+                        ),
                     )
-                ),
+                )
+                for term in ai_terms
+            ])
+        )
+
+    scene_terms = _terms(scene)
+    if scene_terms:
+        q = q.where(
+            _combine([
                 exists(
                     select(SceneSummary.id).where(
                         SceneSummary.asset_id == Asset.id,
                         or_(
-                            SceneSummary.scene_type.ilike(pattern),
-                            SceneSummary.setting.ilike(pattern),
-                            SceneSummary.time_of_day.ilike(pattern),
-                            SceneSummary.weather.ilike(pattern),
-                            SceneSummary.description.ilike(pattern),
+                            SceneSummary.scene_type.ilike(f"%{term}%"),
+                            SceneSummary.setting.ilike(f"%{term}%"),
+                            SceneSummary.time_of_day.ilike(f"%{term}%"),
+                            SceneSummary.weather.ilike(f"%{term}%"),
+                            SceneSummary.description.ilike(f"%{term}%"),
                         ),
                     )
-                ),
-                exists(
-                    select(ObjectDetection.id).where(
-                        ObjectDetection.asset_id == Asset.id,
-                        ObjectDetection.label.ilike(pattern),
-                    )
-                ),
+                )
+                for term in scene_terms
+            ])
+        )
+
+    place_terms = _terms(place)
+    if place_terms:
+        q = q.where(
+            _combine([
                 exists(
                     select(PlaceCandidate.id).where(
                         PlaceCandidate.asset_id == Asset.id,
                         or_(
-                            PlaceCandidate.name.ilike(pattern),
-                            PlaceCandidate.country.ilike(pattern),
-                            PlaceCandidate.region.ilike(pattern),
-                            PlaceCandidate.place_type.ilike(pattern),
+                            PlaceCandidate.name.ilike(f"%{term}%"),
+                            PlaceCandidate.country.ilike(f"%{term}%"),
+                            PlaceCandidate.region.ilike(f"%{term}%"),
+                            PlaceCandidate.place_type.ilike(f"%{term}%"),
                         ),
                     )
-                ),
-            )
+                )
+                for term in place_terms
+            ])
         )
 
-    if ai_text and ai_text.strip():
-        pattern = f"%{ai_text.strip()}%"
+    object_terms = _terms(object_label)
+    if object_terms:
         q = q.where(
-            exists(
-                select(ExtractionRun.id).where(
-                    ExtractionRun.asset_id == Asset.id,
-                    or_(
-                        cast(ExtractionRun.raw_output, Text).ilike(pattern),
-                        ExtractionRun.error_message.ilike(pattern),
-                    ),
+            _combine([
+                exists(
+                    select(ObjectDetection.id).where(
+                        ObjectDetection.asset_id == Asset.id,
+                        ObjectDetection.label.ilike(f"%{term}%"),
+                    )
                 )
-            )
-        )
-
-    if scene and scene.strip():
-        pattern = f"%{scene.strip()}%"
-        q = q.where(
-            exists(
-                select(SceneSummary.id).where(
-                    SceneSummary.asset_id == Asset.id,
-                    or_(
-                        SceneSummary.scene_type.ilike(pattern),
-                        SceneSummary.setting.ilike(pattern),
-                        SceneSummary.time_of_day.ilike(pattern),
-                        SceneSummary.weather.ilike(pattern),
-                        SceneSummary.description.ilike(pattern),
-                    ),
-                )
-            )
-        )
-
-    if place and place.strip():
-        pattern = f"%{place.strip()}%"
-        q = q.where(
-            exists(
-                select(PlaceCandidate.id).where(
-                    PlaceCandidate.asset_id == Asset.id,
-                    or_(
-                        PlaceCandidate.name.ilike(pattern),
-                        PlaceCandidate.country.ilike(pattern),
-                        PlaceCandidate.region.ilike(pattern),
-                        PlaceCandidate.place_type.ilike(pattern),
-                    ),
-                )
-            )
-        )
-
-    if object_label and object_label.strip():
-        pattern = f"%{object_label.strip()}%"
-        q = q.where(
-            exists(
-                select(ObjectDetection.id).where(
-                    ObjectDetection.asset_id == Asset.id,
-                    ObjectDetection.label.ilike(pattern),
-                )
-            )
+                for term in object_terms
+            ])
         )
 
     if review_bucket == "needs-extraction":
@@ -294,6 +320,7 @@ def list_assets(
     has_gps: Optional[bool] = None,
     has_ai: Optional[bool] = None,
     review_bucket: Optional[str] = None,
+    match_mode: str = "any",
     page: int = 1,
     page_size: int = 48,
 ) -> tuple[list[Asset], int]:
@@ -311,6 +338,7 @@ def list_assets(
         has_gps=has_gps,
         has_ai=has_ai,
         review_bucket=review_bucket,
+        match_mode=match_mode,
     )
 
     # Count before pagination
@@ -351,6 +379,7 @@ def list_folders(
     has_gps: Optional[bool] = None,
     has_ai: Optional[bool] = None,
     review_bucket: Optional[str] = None,
+    match_mode: str = "any",
 ) -> list[tuple[str, int]]:
     q = _apply_asset_filters(
         select(Asset),
@@ -365,29 +394,51 @@ def list_folders(
         has_gps=has_gps,
         has_ai=has_ai,
         review_bucket=review_bucket,
+        match_mode=match_mode,
     )
 
     assets = session.scalars(q.options(selectinload(Asset.temporal))).all()
     counts: dict[str, int] = {}
-    normalized_prefix = (folder_prefix or "").strip("/")
+    normalized_prefix = (folder_prefix or "").replace("\\", "/").rstrip("/")
     for asset in assets:
-        root = Path(asset.source_root or "")
-        try:
-            relative_parent = str(Path(asset.canonical_path).relative_to(root).parent)
-        except Exception:
-            relative_parent = str(Path(asset.canonical_path).parent)
-        if relative_parent in (".", ""):
-            relative_parent = "/"
-        relative_parent = relative_parent.replace("\\", "/")
-        parts = [] if relative_parent == "/" else relative_parent.split("/")
-        if normalized_prefix:
-            prefix_parts = normalized_prefix.split("/")
-            if parts[: len(prefix_parts)] != prefix_parts:
-                continue
-            next_parts = parts[: len(prefix_parts) + 1]
+        canonical_parent = Path(asset.canonical_path).parent
+        source_root = Path(asset.source_root).resolve() if asset.source_root else None
+
+        if source_root:
+            source_label = source_root.name or str(source_root).replace("\\", "/")
+            try:
+                relative_parent = canonical_parent.resolve().relative_to(source_root)
+                relative_parts = [part for part in relative_parent.parts if part not in ("", ".")]
+                ancestor_paths = [source_label]
+                if relative_parts:
+                    ancestor_paths.extend(
+                        "/".join([source_label, *relative_parts[: index + 1]])
+                        for index in range(len(relative_parts))
+                    )
+            except Exception:
+                fallback_parent = str(canonical_parent).replace("\\", "/").strip("/")
+                if not fallback_parent:
+                    continue
+                fallback_parts = [part for part in fallback_parent.split("/") if part]
+                ancestor_paths = ["/".join(fallback_parts[: index + 1]) for index in range(len(fallback_parts))]
         else:
-            next_parts = parts[:1]
-        key = "/".join([part for part in next_parts if part]) or "/"
-        counts[key] = counts.get(key, 0) + 1
+            fallback_parent = str(canonical_parent).replace("\\", "/").strip("/")
+            if not fallback_parent:
+                continue
+            fallback_parts = [part for part in fallback_parent.split("/") if part]
+            ancestor_paths = ["/".join(fallback_parts[: index + 1]) for index in range(len(fallback_parts))]
+
+        if normalized_prefix:
+            if not any(
+                key == normalized_prefix or key.startswith(f"{normalized_prefix}/")
+                for key in ancestor_paths
+            ):
+                continue
+            for key in ancestor_paths:
+                if key == normalized_prefix or key.startswith(f"{normalized_prefix}/"):
+                    counts[key] = counts.get(key, 0) + 1
+        else:
+            for key in ancestor_paths:
+                counts[key] = counts.get(key, 0) + 1
 
     return sorted(counts.items(), key=lambda item: item[0])

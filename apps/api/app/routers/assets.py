@@ -467,6 +467,7 @@ async def list_assets(
     scene: str | None = Query(None),
     place: str | None = Query(None),
     object_label: str | None = Query(None, alias="object"),
+    match_mode: str = Query("any", alias="match"),
     folder: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(48, ge=1, le=200),
@@ -487,6 +488,7 @@ async def list_assets(
             scene=scene,
             place=place,
             object_label=object_label,
+            match_mode=match_mode,
             folder=folder,
             has_ocr=has_ocr,
             has_gps=has_gps,
@@ -546,6 +548,7 @@ async def get_folders(
     scene: str | None = Query(None),
     place: str | None = Query(None),
     object_label: str | None = Query(None, alias="object"),
+    match_mode: str = Query("any", alias="match"),
     folder: str | None = Query(None),
     asset_type: str | None = Query(None, alias="type"),
     has_ocr: bool | None = Query(None),
@@ -565,12 +568,13 @@ async def get_folders(
             scene=scene,
             place=place,
             object_label=object_label,
+            match_mode=match_mode,
             has_ocr=has_ocr,
             has_gps=has_gps,
             has_ai=has_ai,
             review_bucket=review_bucket,
         )
-    return FolderResponse(items=[FolderItem(path=path, count=count) for path, count in items[:40]])
+    return FolderResponse(items=[FolderItem(path=path, count=count) for path, count in items])
 
 
 @router.post("/reset-metadata", response_model=ResetMetadataResponse)

@@ -3,13 +3,16 @@ import { Copy, Film, Folder, ScanSearch, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AssetListItem } from "@/lib/api";
 
-export function AssetCard({ asset, compact = false }: { asset: AssetListItem; compact?: boolean }) {
+export function AssetCard({ asset, compact = false, focused = false }: { asset: AssetListItem; compact?: boolean; focused?: boolean }) {
   const paddingPct = asset.width && asset.height ? `${(asset.height / asset.width) * 100}%` : "75%";
 
   return (
-    <Link href={`/asset/${asset.id}`} className="group relative mb-3 block break-inside-avoid">
+    <Link href={`/asset/${asset.id}`} data-asset-id={asset.id} className="group relative mb-3 block break-inside-avoid">
       <div
-        className="relative overflow-hidden rounded-[1.4rem] border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-raised))] shadow-[0_24px_60px_-40px_rgba(0,0,0,0.42)] transition-all duration-300 group-hover:-translate-y-1 group-hover:border-[hsl(var(--border-strong))]"
+        className={cn(
+          "relative overflow-hidden rounded-[1.4rem] border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-raised))] shadow-[0_24px_60px_-40px_rgba(0,0,0,0.42)] transition-all duration-300 group-hover:-translate-y-1 group-hover:border-[hsl(var(--border-strong))]",
+          focused && "ring-2 ring-[hsl(var(--accent-strong))] ring-offset-2 ring-offset-[hsl(var(--background))]"
+        )}
         style={{ paddingBottom: paddingPct }}
       >
         {asset.thumbnail_url ? (

@@ -15,10 +15,10 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/gallery",  label: "Gallery",  icon: Grid2X2 },
-  { href: "/places",   label: "Places",   icon: MapPin },
-  { href: "/review",   label: "Review",   icon: ClipboardList },
-  { href: "/jobs",     label: "Jobs",     icon: Cpu },
+  { href: "/gallery", label: "Gallery", icon: Grid2X2 },
+  { href: "/places", label: "Places", icon: MapPin },
+  { href: "/review", label: "Review", icon: ClipboardList },
+  { href: "/jobs", label: "Jobs", icon: Cpu },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -27,10 +27,12 @@ export function Sidebar() {
   const { theme, setTheme } = useTheme();
 
   return (
-    <aside className="z-20 flex min-h-screen w-[var(--sidebar-width)] shrink-0 flex-col border-r border-[hsl(var(--border))] bg-[linear-gradient(180deg,hsl(var(--surface)),hsl(var(--surface-raised)))]">
+    <aside className="z-20 flex h-screen w-[var(--sidebar-width)] shrink-0 flex-col border-r border-[hsl(var(--border))] bg-[linear-gradient(180deg,hsl(var(--surface)),hsl(var(--surface-raised)))]">
       <div className="border-b border-[hsl(var(--border-subtle))] px-3 py-4">
-        <p className="text-[10px] uppercase tracking-[0.28em] text-[hsl(var(--muted))]">Media</p>
-        <p className="mt-2 font-display text-xl leading-none text-[hsl(var(--foreground))]">Archive Tool</p>
+        <p className="text-[10px] uppercase tracking-[0.28em] text-[hsl(var(--muted))]"></p>
+        <p className="mt-2 font-display text-xl leading-none text-[hsl(var(--foreground))]">
+          Media Archive Tool
+        </p>
         <p className="mt-1 text-[10px] leading-relaxed text-[hsl(var(--muted-foreground))]">
           Local-first photo archive workspace
         </p>
@@ -48,11 +50,13 @@ export function Sidebar() {
                 "group flex flex-col items-center gap-1 rounded-[1.1rem] px-1 py-3 transition-colors",
                 active
                   ? "bg-[hsl(var(--accent-strong))] text-[hsl(var(--accent-foreground))] shadow-[0_20px_40px_-24px_rgba(0,0,0,0.55)]"
-                  : "text-[hsl(var(--muted))] hover:bg-[hsl(var(--surface-strong))] hover:text-[hsl(var(--foreground))]"
+                  : "text-[hsl(var(--muted))] hover:bg-[hsl(var(--surface-strong))] hover:text-[hsl(var(--foreground))]",
               )}
             >
               <Icon size={16} strokeWidth={1.5} />
-              <span className="text-[9px] uppercase tracking-[0.18em] font-medium">{label}</span>
+              <span className="text-[9px] uppercase tracking-[0.18em] font-medium">
+                {label}
+              </span>
             </Link>
           );
         })}
@@ -69,7 +73,9 @@ export function Sidebar() {
           ) : (
             <Moon size={16} strokeWidth={1.5} />
           )}
-          <span className="text-[9px] uppercase tracking-[0.18em] font-medium">Theme</span>
+          <span className="text-[9px] uppercase tracking-[0.18em] font-medium">
+            Theme
+          </span>
         </button>
       </div>
     </aside>

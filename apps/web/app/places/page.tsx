@@ -4,6 +4,7 @@ import Link from "next/link";
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { ExternalLink, MapPin, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
 import { api, type AssetListItem } from "@/lib/api";
+import { PlacesMap } from "@/components/maps/places-map";
 import { cn } from "@/lib/utils";
 
 function openStreetMapUrl(lat: number, lon: number) {
@@ -13,6 +14,7 @@ function openStreetMapUrl(lat: number, lon: number) {
 export default function PlacesPage() {
   const [items, setItems] = useState<AssetListItem[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
+  const [locationFilter, setLocationFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filterOpen, setFilterOpen] = useState(true);
@@ -26,7 +28,7 @@ export default function PlacesPage() {
   const deferredFolder = useDeferredValue(folderFilter);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-  const [mapScope, setMapScope] = useState<"selected" | "all" | "folder">("selected");
+  const [mapScope, setMapScope] = useState<"selected" | "all" | "folder">("all");
   const [mapFolder, setMapFolder] = useState<string>("all");
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
@@ -67,51 +69,60 @@ export default function PlacesPage() {
     load();
   }, [load]);
 
+  const scopedItems = useMemo(() => {
+    if (mapScope === "folder" && mapFolder !== "all") {
+      return items.filter((item) => item.folder_path === mapFolder);
+    }
+    return items;
+  }, [items, mapFolder, mapScope]);
+
+  const locationOptions = useMemo(() => {
+    const labels = new Set<string>();
+    for (const item of scopedItems) {
+      if (item.place_label?.trim()) {
+        labels.add(item.place_label.trim());
+      }
+    }
+    return [...labels].sort((a, b) => a.localeCompare(b));
+  }, [scopedItems]);
+
+  const visibleItems = useMemo(() => {
+    if (locationFilter === "all") return scopedItems;
+    return scopedItems.filter((item) => item.place_label === locationFilter);
+  }, [locationFilter, scopedItems]);
+
+  useEffect(() => {
+    if (locationFilter !== "all" && !locationOptions.includes(locationFilter)) {
+      setLocationFilter("all");
+    }
+  }, [locationFilter, locationOptions]);
+
+  useEffect(() => {
+    if (!visibleItems.some((item) => item.id === selectedId)) {
+      setSelectedId(visibleItems[0]?.id ?? null);
+    }
+  }, [visibleItems, selectedId]);
+
   const selected = useMemo(
-    () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
-    [items, selectedId]
+    () => visibleItems.find((item) => item.id === selectedId) ?? visibleItems[0] ?? null,
+    [visibleItems, selectedId]
   );
 
   const mapItems = useMemo(() => {
     if (mapScope === "selected") {
       return selected ? [selected] : [];
     }
-    if (mapScope === "folder" && mapFolder !== "all") {
-      return items.filter((item) => item.folder_path === mapFolder);
-    }
-    return items;
-  }, [items, mapFolder, mapScope, selected]);
-
-  const mapUrl = useMemo(() => {
-    if (mapItems.length === 0) return null;
-    const withCoords = mapItems.filter((item) => item.lat != null && item.lon != null);
-    if (withCoords.length === 0) return null;
-    const lats = withCoords.map((item) => item.lat as number);
-    const lons = withCoords.map((item) => item.lon as number);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLon = Math.min(...lons);
-    const maxLon = Math.max(...lons);
-    const latPad = Math.max((maxLat - minLat) * 0.2, 0.02);
-    const lonPad = Math.max((maxLon - minLon) * 0.2, 0.02);
-    const left = minLon - lonPad;
-    const right = maxLon + lonPad;
-    const top = maxLat + latPad;
-    const bottom = minLat - latPad;
-    const centerLat = (minLat + maxLat) / 2;
-    const centerLon = (minLon + maxLon) / 2;
-    const base = `https://www.openstreetmap.org/export/embed.html?bbox=${left}%2C${bottom}%2C${right}%2C${top}&layer=mapnik`;
-    if (withCoords.length === 1) {
-      return `${base}&marker=${withCoords[0].lat}%2C${withCoords[0].lon}`;
-    }
-    return `${base}&marker=${centerLat}%2C${centerLon}`;
-  }, [mapItems]);
+    return visibleItems;
+  }, [mapScope, visibleItems, selected]);
 
   function resetFilters() {
     setQuery("");
     setAiText("");
     setPlaceFilter("");
     setFolderFilter("");
+    setLocationFilter("all");
+    setMapScope("all");
+    setMapFolder("all");
   }
 
   if (loading) {
@@ -133,7 +144,7 @@ export default function PlacesPage() {
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
-            <StatCard label="Mapped photos" value={String(items.length)} hint="results with coordinates" />
+            <StatCard label="Mapped photos" value={String(visibleItems.length)} hint="results with coordinates" />
             <StatCard label="Selected place" value={selected?.place_label ?? "—"} hint={selected?.filename ?? "pick a photo"} />
             <StatCard
               label="Coordinates"
@@ -187,10 +198,17 @@ export default function PlacesPage() {
       </section>
 
       {filterOpen ? (
-        <div className="grid gap-1.5 border-b border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface))] px-5 py-1.5 md:grid-cols-[minmax(140px,0.9fr)_minmax(140px,1fr)_minmax(140px,1fr)_180px_180px]">
+        <div className="grid gap-1.5 border-b border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface))] px-5 py-1.5 md:grid-cols-[minmax(140px,0.9fr)_minmax(140px,1fr)_minmax(170px,1fr)_180px_180px_120px]">
           <Field placeholder="AI text: summary, notes, tags..." value={aiText} onChange={setAiText} />
           <Field placeholder="Place: bay, city, district..." value={placeFilter} onChange={setPlaceFilter} />
-          <Field placeholder="Folder: 2019 June 29..." value={folderFilter} onChange={setFolderFilter} />
+          <SelectField
+            value={locationFilter}
+            onChange={setLocationFilter}
+            options={[
+              { value: "all", label: "Location: all" },
+              ...locationOptions.map((location) => ({ value: location, label: location })),
+            ]}
+          />
           <SelectField
             value={mapScope}
             onChange={(value) => setMapScope(value as "selected" | "all" | "folder")}
@@ -209,6 +227,12 @@ export default function PlacesPage() {
               ...folders.map((folder) => ({ value: folder, label: folder })),
             ]}
           />
+          <button
+            onClick={() => setLocationFilter("all")}
+            className="h-9 rounded-[0.85rem] border border-[hsl(var(--border))] bg-[hsl(var(--surface-raised))] px-3 text-[12px] transition-colors hover:bg-[hsl(var(--surface))]"
+          >
+            Clear
+          </button>
         </div>
       ) : null}
 
@@ -224,40 +248,57 @@ export default function PlacesPage() {
                 Location list
               </div>
               <div className="divide-y divide-[hsl(var(--border-subtle))]">
-                {items.map((item) => {
+                <div className="grid grid-cols-[92px_minmax(0,1.15fr)_minmax(150px,0.9fr)_110px_140px] gap-3 px-4 py-2 text-[10px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">
+                  <span>Preview</span>
+                  <span>Photo</span>
+                  <span>Location</span>
+                  <span>Date</span>
+                  <span>Coords</span>
+                </div>
+                {visibleItems.map((item) => {
                   const selectedRow = item.id === selected?.id;
                   return (
                     <button
                       key={item.id}
                       onClick={() => setSelectedId(item.id)}
                       className={cn(
-                        "grid w-full grid-cols-[92px_minmax(0,1fr)] gap-3 px-4 py-3 text-left transition-colors hover:bg-[hsl(var(--surface-raised))]",
+                        "grid w-full grid-cols-[92px_minmax(0,1.15fr)_minmax(150px,0.9fr)_110px_140px] gap-3 px-4 py-3 text-left transition-colors hover:bg-[hsl(var(--surface-raised))]",
                         selectedRow && "bg-[hsl(var(--surface-raised))]"
                       )}
                     >
                       <div className="overflow-hidden rounded-[0.9rem] bg-[hsl(var(--surface-raised))]">
-                        {item.thumbnail_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={item.thumbnail_url} alt={item.filename} className="h-[74px] w-full object-cover" />
-                        ) : (
-                          <div className="flex h-[74px] items-center justify-center text-[10px] text-[hsl(var(--muted))]">No preview</div>
-                        )}
+                        <Link
+                          href={`/gallery?focus=${item.id}`}
+                          onClick={(event) => event.stopPropagation()}
+                          className="block h-[74px] w-full"
+                        >
+                          {item.thumbnail_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={item.thumbnail_url} alt={item.filename} className="h-[74px] w-full object-cover" />
+                          ) : (
+                            <div className="flex h-[74px] items-center justify-center text-[10px] text-[hsl(var(--muted))]">No preview</div>
+                          )}
+                        </Link>
                       </div>
                       <div className="min-w-0 space-y-1">
                         <p className="truncate text-[13px] font-medium">{item.filename}</p>
-                        <div className="flex flex-wrap gap-2 text-[11px] text-[hsl(var(--muted-foreground))]">
-                          {item.place_label ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-[hsl(var(--border))] px-2 py-0.5">
-                              <MapPin size={11} />
-                              {item.place_label}
-                            </span>
-                          ) : null}
-                          {item.captured_at ? <span>{new Date(item.captured_at).toLocaleDateString()}</span> : null}
-                        </div>
                         <p className="truncate text-[11px] text-[hsl(var(--muted-foreground))]">{item.folder_path ?? "/"}</p>
-                        <p className="font-mono text-[10px] text-[hsl(var(--muted))]">
-                          {item.lat?.toFixed(5) ?? "—"}, {item.lon?.toFixed(5) ?? "—"}
-                        </p>
+                      </div>
+                      <div className="min-w-0 pt-1 text-[11px] text-[hsl(var(--muted-foreground))]">
+                        {item.place_label ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-[hsl(var(--border))] px-2 py-0.5">
+                            <MapPin size={11} />
+                            {item.place_label}
+                          </span>
+                        ) : (
+                          <span>GPS only</span>
+                        )}
+                      </div>
+                      <div className="pt-1 text-[11px] text-[hsl(var(--muted-foreground))]">
+                        {item.captured_at ? new Date(item.captured_at).toLocaleDateString() : "—"}
+                      </div>
+                      <div className="pt-1 font-mono text-[10px] text-[hsl(var(--muted))]">
+                        {item.lat?.toFixed(5) ?? "—"}, {item.lon?.toFixed(5) ?? "—"}
                       </div>
                     </button>
                   );
@@ -270,14 +311,8 @@ export default function PlacesPage() {
                 <div className="border-b border-[hsl(var(--border-subtle))] px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[hsl(var(--muted))]">
                   OpenStreetMap {mapScope === "all" ? "all results" : mapScope === "folder" ? "folder view" : "selected photo"}
                 </div>
-                {mapUrl ? (
-                  <iframe
-                    title="OpenStreetMap"
-                    src={mapUrl}
-                    className="h-[420px] w-full border-0"
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                  />
+                {mapItems.length > 0 ? (
+                  <PlacesMap items={mapItems} selectedId={selected?.id ?? null} onSelect={setSelectedId} mode={mapScope} />
                 ) : (
                   <div className="flex h-[420px] items-center justify-center text-[12px] text-[hsl(var(--muted-foreground))]">
                     No coordinates available for this photo.

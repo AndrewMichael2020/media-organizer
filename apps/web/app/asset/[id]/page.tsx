@@ -214,18 +214,6 @@ export default function AssetDetailPage() {
               </Panel>
             )}
 
-            <Panel title="Capture info" icon={<MapPin size={14} />}>
-              <InfoRow label="Taken" value={formatDate(asset.temporal?.best_timestamp)} />
-              <InfoRow label="Date source" value={asset.temporal?.source ?? "—"} />
-              <InfoRow label="File size" value={formatBytes(asset.file_size_bytes)} />
-              <InfoRow label="Dimensions" value={asset.media_info?.width && asset.media_info?.height ? `${asset.media_info.width} x ${asset.media_info.height}` : "—"} />
-              <InfoRow label="Place" value={asset.place_candidates[0]?.name ?? "—"} />
-              <InfoRow label="GPS" value={asset.location?.lat != null ? `${asset.location.lat.toFixed(5)}, ${asset.location.lon?.toFixed(5) ?? "—"}` : "—"} />
-              <InfoRow label="Camera" value={[asset.media_info?.camera_make, asset.media_info?.camera_model].filter(Boolean).join(" ") || "—"} />
-              <InfoRow label="Lens" value={asset.media_info?.lens_model ?? "—"} />
-              <InfoRow label="Path" value={folderPath} mono />
-            </Panel>
-
             <Panel title="AI facts analysis" icon={<Sparkles size={14} />}>
               <div className="grid gap-3 sm:grid-cols-2">
                 <FactBox label="People detected" value={String(facts.personCount)} />
@@ -283,6 +271,18 @@ export default function AssetDetailPage() {
             ) : (
               <p className="text-[12px] text-[hsl(var(--muted-foreground))]">No text was saved for this image.</p>
             )}
+          </Panel>
+
+          <Panel title="Capture info" icon={<MapPin size={14} />}>
+            <InfoRow label="Taken" value={formatDate(asset.temporal?.best_timestamp)} />
+            <InfoRow label="Date source" value={asset.temporal?.source ?? "—"} />
+            <InfoRow label="File size" value={formatBytes(asset.file_size_bytes)} />
+            <InfoRow label="Dimensions" value={asset.media_info?.width && asset.media_info?.height ? `${asset.media_info.width} x ${asset.media_info.height}` : "—"} />
+            <InfoRow label="Place" value={asset.place_candidates[0]?.name ?? "—"} />
+            <InfoRow label="GPS" value={asset.location?.lat != null ? `${asset.location.lat.toFixed(5)}, ${asset.location.lon?.toFixed(5) ?? "—"}` : "—"} />
+            <InfoRow label="Camera" value={[asset.media_info?.camera_make, asset.media_info?.camera_model].filter(Boolean).join(" ") || "—"} />
+            <InfoRow label="Lens" value={asset.media_info?.lens_model ?? "—"} />
+            <InfoRow label="Path" value={folderPath} mono />
           </Panel>
 
           <Panel title="AI run" icon={<Sparkles size={14} />}>

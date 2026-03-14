@@ -12,6 +12,6 @@ _DB_PKG = Path(__file__).parents[4] / "packages" / "db"
 if str(_DB_PKG) not in sys.path:
     sys.path.insert(0, str(_DB_PKG))
 
-from session import get_session  # noqa: E402 (re-export)
+from session import get_engine, get_session  # noqa: E402 (re-export)
 
-__all__ = ["get_session"]
+__all__ = ["get_session", "get_engine"]

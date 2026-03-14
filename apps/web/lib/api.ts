@@ -148,6 +148,14 @@ export interface ConfigSnapshot {
   api_version: string;
 }
 
+export interface PurgeMetadataResponse {
+  status: string;
+  tables_reset: boolean;
+  cache_root: string;
+  cache_cleared: boolean;
+  debug_cleared: boolean;
+}
+
 export interface CostStats {
   total_runs: number;
   total_tokens_in: number;
@@ -190,6 +198,7 @@ export const api = {
       scene?: string;
       place?: string;
       object?: string;
+      match?: "any" | "all";
       folder?: string;
       has_ocr?: boolean;
       has_gps?: boolean;
@@ -205,6 +214,7 @@ export const api = {
       if (params?.scene) qs.set("scene", params.scene);
       if (params?.place) qs.set("place", params.place);
       if (params?.object) qs.set("object", params.object);
+      if (params?.match) qs.set("match", params.match);
       if (params?.folder) qs.set("folder", params.folder);
       if (params?.has_ocr) qs.set("has_ocr", "true");
       if (params?.has_gps) qs.set("has_gps", "true");
@@ -227,6 +237,7 @@ export const api = {
       scene?: string;
       place?: string;
       object?: string;
+      match?: "any" | "all";
       folder?: string;
       has_ocr?: boolean;
       has_gps?: boolean;
@@ -240,6 +251,7 @@ export const api = {
       if (params?.scene) qs.set("scene", params.scene);
       if (params?.place) qs.set("place", params.place);
       if (params?.object) qs.set("object", params.object);
+      if (params?.match) qs.set("match", params.match);
       if (params?.folder) qs.set("folder", params.folder);
       if (params?.has_ocr) qs.set("has_ocr", "true");
       if (params?.has_gps) qs.set("has_gps", "true");
@@ -272,6 +284,11 @@ export const api = {
         "/config/source-roots/scan",
         { method: "POST", body: JSON.stringify({ path }) }
       ),
+    purgeMetadata: (confirm_text: string) =>
+      apiFetch<PurgeMetadataResponse>("/config/purge-metadata", {
+        method: "POST",
+        body: JSON.stringify({ confirm_text }),
+      }),
   },
 
   health: () => apiFetch<{ status: string; db: string; version: string }>("/health"),
