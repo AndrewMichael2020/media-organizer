@@ -1,0 +1,16 @@
+# Forensic Media Organizer — Default Configuration
+# Override any value in config/local.yaml or via FMO_* env vars
+
+database:
+  url: "postgresql://fmo:fmo@localhost:5432/fmo"
+
+model:
+  provider: "gemini"
+  name: "gemini-2.0-flash-lite"
+
+storage:
+  source_roots: []
+  derivative_cache_root: "/tmp/fmo_cache"
+
+worker:
+  concurrency: 2

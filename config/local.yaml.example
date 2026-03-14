@@ -1,0 +1,15 @@
+# Local overrides — not committed to git
+# Copy this file to config/local.yaml and edit
+
+# storage:
+#   source_roots:
+#     - /Volumes/MyDrive/Photos
+#     - /Users/me/Pictures
+#   derivative_cache_root: /Users/me/.fmo_cache
+
+# model:
+#   provider: gemini
+#   name: gemini-2.0-flash-lite
+
+# database:
+#   url: "postgresql://fmo:fmo@localhost:5432/fmo"

@@ -1,0 +1,11 @@
+[project]
+name = "forensic-models"
+version = "0.1.0"
+description = "Model router and provider adapters for FMO"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=1.15.0",
+    "pydantic>=2.0",
+    "pillow>=12.1.1",
+]
