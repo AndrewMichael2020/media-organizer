@@ -1,238 +1,226 @@
 # Media Archive Tool
 
-A private local-first forensic-grade media organizer for large photo and video archives.
+Local-first archive software for large personal photo collections.
 
-Originals stay in place. Metadata, thumbnails, and AI-extracted knowledge are stored separately. Built for one user, on localhost, with a fast inspection-first UI.
+The originals stay where they already live on disk. The app layers metadata, thumbnails, OCR, AI summaries, tags, places, and review queues on top so you can browse and search a big archive without reorganizing the files themselves.
 
----
+## What It Does
 
-## Prerequisites
+- Scans folders recursively and keeps a catalog of the files it finds
+- Extracts deterministic metadata with `exiftool` and `ffprobe`
+- Generates thumbnails for common image, video, RAW, and Apple formats
+- Runs AI extraction for OCR, summaries, tags, objects, place clues, and image notes
+- Provides a local web app with Gallery, Places, Review, Jobs, and Settings
+- Supports folder-scoped jobs so you can process one part of the archive at a time
 
-- macOS (primary target: M1 Max)
-- Docker Desktop (for PostgreSQL)
-- [uv](https://docs.astral.sh/uv/) — Python package manager (`brew install uv`)
-- Node.js 20+ and npm
-- ExifTool (`brew install exiftool`)
-- ffmpeg + ffprobe (`brew install ffmpeg`)
+## Current Focus
 
----
+This project is optimized for local archive exploration, not cloud multi-user deployment.
 
-## Local setup
+- Primary development target: macOS
+- Web UI: Next.js
+- API: FastAPI
+- Database: PostgreSQL via Docker
+- AI provider: Gemini
+
+## Requirements
+
+- macOS
+- Docker Desktop
+- `uv`
+- Node.js 20+
+- `exiftool`
+- `ffmpeg`
+
+Example install on macOS:
 
 ```bash
-# 1. Copy config and env
-cp config/local.yaml.example config/local.yaml   # edit source_roots
-cp .env.example .env                              # add GEMINI_API_KEY
-
-# 2. Start everything (macOS — opens terminals)
-bash scripts/dev.sh
+brew install uv exiftool ffmpeg
 ```
 
-Or start services individually:
+## Quick Start
+
+1. Copy the example files.
 
 ```bash
-bash scripts/db-start.sh   # PostgreSQL via Docker
-bash scripts/api-start.sh  # FastAPI on :8000
-bash scripts/web-start.sh  # Next.js on :3000
+cp .env.example .env
+cp config/local.yaml.example config/local.yaml
 ```
 
----
-
-## URLs
-
-| Service | URL |
-|---|---|
-| Web UI | http://localhost:3000 |
-| API docs | http://localhost:8000/docs |
-| API health | http://localhost:8000/health |
-
----
-
-## Project layout
-
-```
-apps/
-  api/        FastAPI — catalog API and orchestration
-  web/        Next.js — gallery, inspection, review, jobs, settings
-  worker/     Background ingestion and extraction jobs
-
-packages/
-  core/       Domain models, config, shared schemas
-  db/         Migrations, repositories
-  media/      ExifTool / ffprobe / thumbnail wrappers
-  models/     Multimodal model router and provider adapters
-  ocr/        OCR normalization
-  vision/     Extraction orchestration
-  search/     Search and ranking
-  storage/    Local filesystem adapter
-
-config/       YAML config (default.yaml + local.yaml)
-prompts/      Prompt templates (outside business logic)
-scripts/      Dev and operational scripts
-```
-
----
-
-## Configuration
-
-Edit `config/local.yaml` to set your source roots and model:
+2. Edit `config/local.yaml` and set your photo roots.
 
 ```yaml
 storage:
   source_roots:
-    - /path/to/your/photos
-
-model:
-  name: gemini-2.0-flash-lite
+    - "/Users/you/Pictures"
 ```
 
-All values can also be overridden with `FMO_` env vars (e.g. `FMO_MODEL_NAME`).
+3. Edit `.env` and add your Gemini key.
 
-### AI cost controls
-
-The default extraction flow now aims to keep output much shorter than before:
-
-- `worker.ai_max_output_tokens`: caps model output size
-- `worker.image_analysis_max_px`: controls how large the analysis image sent to Gemini can be
-
-Default values in `config/default.yaml` are tuned for a cheaper balanced mode:
-
-```yaml
-worker:
-  image_analysis_max_px: 1200
-  ai_max_output_tokens: 320
-```
-
-If you want the cheapest possible pass, lower `ai_max_output_tokens` first. That reduces cost faster than shrinking the image too aggressively.
-
-### NEF / RAW files
-
-`NEF` and other RAW files are supported, but there is an important tradeoff:
-
-- RAW decoding through generic image libraries often produces soft or poor previews
-- many cameras embed a JPEG preview inside the RAW file, and that preview is usually the best source for thumbnails
-- this app now prefers the embedded preview via `exiftool` when generating RAW thumbnails
-
-Recommended workflow for RAW-heavy archives:
-
-- run `reprocess` again after pulling the latest code so new sharper RAW thumbnails are generated
-- keep `exiftool` installed
-- expect some RAW files to still need special handling if the camera did not embed a usable preview
-
-If you see a specific NEF file that still looks bad after reprocessing, that usually means the embedded preview is missing or unusually small. In that case the next step would be adding a dedicated RAW decoder such as `rawpy`.
-
-### HEIC / Apple image formats
-
-`HEIC` and `HEIF` are supported.
-
-- on macOS, thumbnail and AI-prep fallback now uses `sips` when direct decoding is unreliable
-- this makes Apple formats much more dependable without forcing a full library conversion
-
-If a folder previously showed many HEIC extraction failures, rerun `reprocess` and then `extract` on that folder.
-
----
-
-## Restarting the servers
-
-The stack runs as three separate processes: Docker (Postgres), FastAPI, and Next.js.
-Each has its own terminal tab opened by `scripts/dev.sh`.
-
-### Stop everything
 ```bash
-# Stop Docker
-docker compose down
-
-# Kill API (find the uvicorn PID and kill it)
-lsof -ti :8000 | xargs kill -9
-
-# Kill Next.js dev server
-lsof -ti :3000 | xargs kill -9
+GEMINI_API_KEY=your_key_here
 ```
 
-### Restart individual servers
-```bash
-# API only (picks up Python changes automatically via --reload)
-bash scripts/api-start.sh
+4. Start the stack.
 
-# Web only (Next.js hot-reloads automatically, but full restart if needed)
-bash scripts/web-start.sh
-
-# DB only (normally stays running between restarts)
-bash scripts/db-start.sh
-```
-
-### Restart everything fresh
 ```bash
 bash scripts/dev.sh
 ```
 
-> **Note:** The FastAPI server (`--reload`) and Next.js dev server both support **hot reload** —
-> most code changes are picked up automatically without a restart.
-> You only need to restart if you add new Python packages (`uv add`) or change `next.config.ts`.
+That starts:
 
-## Commands
+- PostgreSQL on `localhost:5432`
+- API on `http://localhost:8000`
+- Web app on `http://localhost:3000`
 
-### Python packages
+## Running Services Manually
+
 ```bash
-# Run DB migrations
-bash scripts/db-migrate.sh
-
-# Scan a source root (via API)
-curl -X POST http://localhost:8000/jobs/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"type":"scan","source_root":"/path/to/photos"}'
-
-# Enrich all pending assets (ExifTool + ffprobe)
-curl -X POST http://localhost:8000/jobs/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"type":"enrich"}'
-
-# Generate thumbnails
-curl -X POST http://localhost:8000/jobs/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"type":"reprocess"}'
-
-# AI extraction (requires GEMINI_API_KEY in .env)
-curl -X POST http://localhost:8000/jobs/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"type":"extract"}'
+bash scripts/db-start.sh
+bash scripts/api-start.sh
+bash scripts/web-start.sh
 ```
 
-## What's implemented
+Useful URLs:
 
-- [x] Monorepo scaffold (Issue 1.1)
-- [x] YAML + env config system (Issue 1.2)
-- [x] Dev scripts: `scripts/dev.sh`, `api-start.sh`, `web-start.sh`, `db-migrate.sh` (Issue 1.3)
-- [x] FastAPI: `/health`, `/assets`, `/jobs`, `/jobs/ingest`, `/config` — wired to real DB
-- [x] Next.js app shell — Gallery, Places, Review, Jobs, Settings — wired to real API
-- [x] White-first artsy UI (sidebar nav, topbar, theme switch, masonry grid, list view, filters)
-- [x] PostgreSQL schema: 16 tables with indexes (Issue 2.1)
-- [x] Alembic migrations (`packages/db/migrations/`)
-- [x] DB session factory (`packages/db/session.py`)
-- [x] Asset repository — upsert, list, mark-missing (Issue 2.2 partial)
-- [x] Filesystem scanner — recursive scan, delta detection (Issue 3.1–3.2)
-- [x] SHA-256 + pHash hashing (Issue 3.3)
-- [x] ExifTool adapter (Issue 4.1 partial)
-- [x] ffprobe adapter (Issue 4.1 partial)
-- [x] Deterministic enrichment — media info, temporal resolution, GPS location (Issue 4.1–4.2)
-- [x] Scan + enrich + thumbnail + AI extract jobs wired to FastAPI background tasks (Issue 7.1)
-- [x] Source root picker in Settings — typed path, live validation, one-click scan
-- [x] Thumbnail generation — PIL resize for images, ffmpeg keyframes for video (Issue 4.3)
-- [x] `GET /assets/{id}/thumbnail` — serve thumbnail JPEG, fallback to keyframe
-- [x] Asset detail page `/asset/[id]` — OCR, scene, objects, place candidates, raw EXIF
-- [x] Model router + Gemini adapter (`packages/models/`) (Issue 5.1)
-- [x] Extraction schemas + `prompts/image_v1.txt` (Issues 5.2–5.3)
-- [x] AI image extraction pipeline — validate → persist OCR/scene/objects/places (Issue 6.1–6.3)
-- [x] Full-text search wired in gallery filter bar (Issue 8.2)
-- [x] Structured gallery filters for scene, place, object, and folder browsing
-- [x] Folder browser in gallery for nested archive navigation
-- [x] Cleaner asset detail page with AI summary, image notes, and series grouping
+- Web UI: `http://localhost:3000`
+- API docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
 
-## What's next
+## Typical Workflow
 
-- [ ] Review queues UI (Issue 9.4)
-- [ ] Places page — map or list of geo-tagged assets (Issue 9.5)
-- [ ] Video extraction — keyframe-level AI extraction (Issue 6.4)
-- [ ] Person region persistence + clustering (Issue 6.2)
-- [ ] Full Assertion audit trail UI (Issue 10.x)
-- [ ] Dedicated RAW fallback decoder for edge-case NEF files without a strong embedded preview
+1. Add one or more archive roots in Settings or `config/local.yaml`.
+2. Run a scan.
+3. Run enrich.
+4. Run reprocess to generate thumbnails.
+5. Run extract for AI metadata.
+6. Browse in Gallery, inspect on the asset page, use Places for geo-tagged items, and use Review for items that need attention.
+
+You can run jobs for the whole archive or for a selected folder only.
+
+## Jobs
+
+The Jobs page can run:
+
+- `scan`
+- `enrich`
+- `reprocess`
+- `extract`
+- folder-level metadata reset
+
+The app also supports stopping a queued or running job. Stop is cooperative: it stops between items rather than killing the current file mid-processing.
+
+## Configuration
+
+Defaults live in `config/default.yaml`.
+
+Local machine overrides live in `config/local.yaml`.
+
+Environment variables in `.env` can override config values too.
+
+Important settings:
+
+```yaml
+database:
+  url: "postgresql://fmo:fmo@localhost:5432/fmo"
+
+model:
+  provider: "gemini"
+  name: "gemini-2.0-flash-lite"
+
+storage:
+  source_roots: []
+  derivative_cache_root: "/tmp/fmo_cache"
+
+worker:
+  concurrency: 2
+  image_analysis_max_px: 1200
+  ai_max_output_tokens: null
+```
+
+Notes:
+
+- `ai_max_output_tokens: null` means the app does not force an output cap.
+- Set a numeric cap only if you intentionally want to limit output length.
+- Keep secrets like API keys in `.env`, not in YAML config.
+
+## Search
+
+Gallery supports:
+
+- broad text search
+- structured scene, place, object, and AI-text filters
+- folder browsing
+- OCR and GPS filters
+- review-state filters
+
+The AI text search is useful for full-text matching over AI summaries, notes, and extracted text-like fields.
+
+## Formats and Media Notes
+
+### RAW / NEF
+
+RAW support is practical but not perfect.
+
+- The app prefers embedded previews for better thumbnails when available
+- Some RAW files still produce soft previews if the embedded preview is missing or small
+- For large RAW-heavy collections, rerun `reprocess` after updates that improve thumbnail handling
+
+### HEIC / HEIF
+
+Apple image formats are supported.
+
+- On macOS, the app can fall back to `sips` when direct decoding is unreliable
+- If HEIC files were ingested before those fixes, rerun `reprocess` and then `extract`
+
+## AI Cost Guidance
+
+For a large archive, cost control matters.
+
+Practical ways to keep cost down:
+
+- process by folder instead of the whole archive
+- run deterministic enrichment and thumbnails first
+- reserve AI extraction for folders you care about most
+- reduce `image_analysis_max_px` before adding complicated extra prompts
+- use a two-pass workflow later if you want a cheap broad pass and a richer selective pass
+
+Very low budgets for fully detailed multimodal extraction across tens of thousands of images are usually unrealistic without a selective pipeline.
+
+## Debugging AI Extraction
+
+When AI extraction runs, debug payloads are written locally to:
+
+`var/ai_debug`
+
+These files are intentionally git-ignored. They are useful for inspecting raw model output when a parse or provider issue happens.
+
+## Repo Layout
+
+```text
+apps/
+  api/        FastAPI backend
+  web/        Next.js frontend
+  worker/     worker-side app code
+
+packages/
+  db/         database models, migrations, repositories
+  media/      exiftool, ffmpeg, thumbnails, enrichment
+  models/     provider adapters and schemas
+  ocr/        OCR helpers
+  search/     search helpers
+  storage/    filesystem integration
+  vision/     AI extraction orchestration
+
+config/       default and local YAML config
+prompts/      AI prompts
+scripts/      local dev scripts
+tests/        test code
+```
+
+## Notes for Contributors
+
+- Do not commit real media.
+- Do not commit `config/local.yaml` or `.env`.
+- Do not commit `var/` contents.
+- Treat this as a local archive app first: practical, fast, and inspectable beats overengineering.

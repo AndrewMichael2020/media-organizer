@@ -10,6 +10,11 @@ dist/
 build/
 .uv/
 .python-version
+.pytest_cache/
+htmlcov/
+coverage.xml
+.coverage
+.coverage.*
 
 # Type checking / linting caches
 .mypy_cache/
@@ -27,11 +32,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Environment & secrets
+# Environment, overrides, and secrets
 .env
 .env.*
 !.env.example
 config/local.yaml
+config/*.local.yaml
 *.key
 *.pem
 *.p12
@@ -57,7 +63,7 @@ Desktop.ini
 *.swo
 *~
 
-# Logs
+# Logs and runtime output
 *.log
 logs/
 var/
@@ -65,13 +71,6 @@ var/
 # Derived media cache
 /tmp/fmo_cache/
 .fmo_cache/
-
-# Test artifacts
-.pytest_cache/
-htmlcov/
-coverage.xml
-.coverage
-.coverage.*
 
 # Archive (original media — never commit)
 archive - do not read/

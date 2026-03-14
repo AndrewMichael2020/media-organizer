@@ -1,15 +1,21 @@
-# Local overrides — not committed to git
-# Copy this file to config/local.yaml and edit
+# Local overrides — copy to config/local.yaml and edit for your machine.
+# This file is intentionally conservative. Keep secrets in .env, not here.
 
-# storage:
-#   source_roots:
-#     - /Volumes/MyDrive/Photos
-#     - /Users/me/Pictures
-#   derivative_cache_root: /Users/me/.fmo_cache
+database:
+  url: "postgresql://fmo:fmo@localhost:5432/fmo"
 
-# model:
-#   provider: gemini
-#   name: gemini-2.0-flash-lite
+storage:
+  source_roots:
+    - "/Users/me/Pictures"
+    # - "/Volumes/Archive/Photos"
+  derivative_cache_root: "/tmp/fmo_cache"
 
-# database:
-#   url: "postgresql://fmo:fmo@localhost:5432/fmo"
+model:
+  provider: "gemini"
+  name: "gemini-2.0-flash-lite"
+
+worker:
+  concurrency: 2
+  image_analysis_max_px: 1200
+  ai_max_output_tokens: null
+  # Set a number only if you explicitly want to cap model output.
