@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { FolderOpen, Check, X, AlertCircle, Loader, Play, ChevronRight } from "lucide-react";
+import { FolderOpen, Check, X, AlertCircle, Loader, Play } from "lucide-react";
 import { api, type ConfigSnapshot, type SourceRootInfo } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -296,4 +296,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

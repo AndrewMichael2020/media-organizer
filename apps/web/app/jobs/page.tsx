@@ -1,17 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Activity, RefreshCw, Play, Cpu, Image, Layers, Coins } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Activity, RefreshCw, Cpu, Image, Layers, Coins, FolderOpen, Square, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, type JobOut, type CostStats } from "@/lib/api";
 
-type JobStatus = "running" | "queued" | "done" | "failed";
+type JobStatus = "running" | "queued" | "done" | "failed" | "cancelled";
 
 const STATUS_STYLES: Record<JobStatus, string> = {
   running: "text-blue-500",
   queued:  "text-[hsl(var(--muted))]",
   done:    "text-emerald-600",
   failed:  "text-red-500",
+  cancelled: "text-amber-600",
 };
 
 const STATUS_DOT: Record<JobStatus, string> = {
@@ -19,6 +20,7 @@ const STATUS_DOT: Record<JobStatus, string> = {
   queued:  "bg-[hsl(var(--muted))]",
   done:    "bg-emerald-500",
   failed:  "bg-red-500",
+  cancelled: "bg-amber-500",
 };
 
 const JOB_ACTIONS = [
@@ -32,9 +34,12 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState<string | null>(null);
   const [costStats, setCostStats] = useState<CostStats | null>(null);
+  const [scopePath, setScopePath] = useState("");
+  const [busyReset, setBusyReset] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const jobsRef = useRef<JobOut[]>([]);
 
-  const load = () => {
+  const load = useCallback(() => {
     api.jobs.list()
       .then(setJobs)
       .catch(() => {})
@@ -42,18 +47,22 @@ export default function JobsPage() {
     api.jobs.costStats()
       .then(setCostStats)
       .catch(() => {});
-  };
+  }, []);
+
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
 
   // Poll while any job is running
   useEffect(() => {
     load();
     pollRef.current = setInterval(() => {
-      if (jobs.some((j) => j.status === "running" || j.status === "queued")) {
+      if (jobsRef.current.some((j) => j.status === "running" || j.status === "queued")) {
         load();
       }
     }, 3000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
+  }, [load]);
 
   // Re-poll when running jobs exist
   useEffect(() => {
@@ -61,15 +70,38 @@ export default function JobsPage() {
       const t = setTimeout(load, 2500);
       return () => clearTimeout(t);
     }
-  }, [jobs]);
+  }, [jobs, load]);
 
   async function startJob(type: string) {
     setStarting(type);
     try {
-      await api.jobs.startIngest({ type });
+      await api.jobs.startIngest({ type, source_root: scopePath.trim() || undefined });
       load();
     } finally {
       setStarting(null);
+    }
+  }
+
+  async function stopJob(id: string) {
+    await api.jobs.stop(id);
+    load();
+  }
+
+  async function pickFolder() {
+    try {
+      const result = await api.config.pickFolder();
+      setScopePath(result.path);
+    } catch {}
+  }
+
+  async function resetScope() {
+    if (!scopePath.trim()) return;
+    setBusyReset(true);
+    try {
+      await api.assets.resetMetadata(scopePath.trim());
+      load();
+    } finally {
+      setBusyReset(false);
     }
   }
 
@@ -94,6 +126,30 @@ export default function JobsPage() {
         <p className="text-[10px] tracking-[0.2em] uppercase font-medium text-[hsl(var(--muted))] mb-3">
           Run a Job
         </p>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <button
+            onClick={pickFolder}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md text-[11px] font-medium border border-[hsl(var(--border))]"
+          >
+            <FolderOpen size={11} />
+            Pick folder
+          </button>
+          <input
+            type="text"
+            value={scopePath}
+            onChange={(e) => setScopePath(e.target.value)}
+            placeholder="Optional: run only on this folder"
+            className="min-w-[320px] flex-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-raised))] px-3 py-2 text-[12px] font-mono"
+          />
+          <button
+            onClick={resetScope}
+            disabled={!scopePath.trim() || busyReset}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md text-[11px] font-medium border border-[hsl(var(--border))] disabled:opacity-50"
+          >
+            <RotateCcw size={11} />
+            Reset metadata
+          </button>
+        </div>
         <div className="flex gap-2 flex-wrap">
           {JOB_ACTIONS.map(({ type, label, icon: Icon, description }) => (
             <button
@@ -157,7 +213,7 @@ export default function JobsPage() {
           <table className="w-full text-[12px]">
             <thead>
               <tr className="border-b border-[hsl(var(--border-subtle))]">
-                {["Type", "Status", "Started", "Duration", "Message"].map((h) => (
+                {["Type", "Status", "Started", "Duration", "Message", "Actions"].map((h) => (
                   <th key={h} className="text-left px-6 py-2.5 text-[10px] tracking-[0.15em] uppercase font-medium text-[hsl(var(--muted))]">
                     {h}
                   </th>
@@ -191,6 +247,17 @@ export default function JobsPage() {
                       {duration}
                     </td>
                     <td className="px-6 py-3 text-[hsl(var(--muted-foreground))] max-w-sm truncate">{job.message ?? "—"}</td>
+                    <td className="px-6 py-3">
+                      {(job.status === "running" || job.status === "queued") && (
+                        <button
+                          onClick={() => stopJob(job.id)}
+                          className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--border))] px-2 py-1 text-[10px] uppercase tracking-[0.14em]"
+                        >
+                          <Square size={10} />
+                          Stop
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -213,4 +280,3 @@ function Stat({ label, value, highlight }: { label: string; value: string; highl
     </div>
   );
 }
-

@@ -1,20 +1,32 @@
-You are a forensic media analyst. Analyze the provided image and return a JSON object that matches this exact schema. Be precise, factual, and conservative — only report what you can actually see.
+You are analyzing one archive image. Return a compact JSON object that matches the schema exactly.
 
-IMPORTANT RULES:
-- Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON.
-- All string values must be in English.
-- `confidence` fields must be floats between 0.0 and 1.0.
-- Bounding boxes use normalized [0,1] coordinates, top-left origin (x, y, w, h).
-- For `ocr_text`: extract ALL visible text verbatim, preserving line breaks with \n. Return null if no text visible.
-- For `place_candidates`: list up to 3 candidates if recognizable landmarks, signage, or geography is visible. Omit if location is generic/unknown.
-- For `person_regions`: detect all visible persons. Do NOT identify individuals by name.
-- For `objects`: list the top 10 most notable objects/subjects. Min confidence 0.6.
-- `description` must be 2–4 sentences, written as a factual observation log entry.
+Rules:
+- Return JSON only.
+- Return one compact JSON object on a single line if possible.
+- Be brief and literal.
+- Prefer short phrases over long prose.
+- If something is unclear, leave it null or omit it where allowed.
+- OCR should include all readable text. Return null if none is readable.
+- `short_summary` must be one plain sentence, 8 to 18 words.
+- `search_tags` should contain 5 to 12 short tags when possible.
+- `search_tag_details` should contain the same important tags with a short confidence score.
+- `scene.description` must be 1 to 2 short sentences.
+- `artistic_notes` should comment briefly on composition, lighting, visible detail, and resolution.
+- `objects` should include the most useful visible subjects, up to 8.
+- For each object, include a short `color` when clearly visible and 0 to 3 short `details` such as material, clothing, brand, pose, or notable feature.
+- Avoid duplicate object entries. Merge repeated items into one object with a higher `count`.
+- `place_candidates` should include only likely matches.
+- Do not identify people by name.
 
 Schema:
 {
   "schema_version": "image_v1",
   "ocr_text": string | null,
+  "short_summary": string | null,
+  "search_tags": [string],
+  "search_tag_details": [
+    { "label": string, "confidence": float }
+  ],
   "scene": {
     "setting": "outdoor" | "indoor" | "mixed" | null,
     "lighting": "daylight" | "golden_hour" | "night" | "artificial" | "mixed" | null,
@@ -23,8 +35,15 @@ Schema:
     "primary_subject": string | null,
     "description": string
   },
+  "artistic_notes": {
+    "summary": string | null,
+    "composition": string | null,
+    "lighting": string | null,
+    "detail": string | null,
+    "resolution": string | null
+  } | null,
   "objects": [
-    { "label": string, "confidence": float, "bbox": { "x": float, "y": float, "w": float, "h": float } | null, "count": int }
+    { "label": string, "confidence": float, "bbox": { "x": float, "y": float, "w": float, "h": float } | null, "count": int, "color": string | null, "details": [string] }
   ],
   "place_candidates": [
     { "name": string, "country": string | null, "region": string | null, "place_type": string | null, "confidence": float, "reasoning": string | null }

@@ -17,12 +17,24 @@ export interface AssetListItem {
   filename: string;
   type: "photo" | "video";
   date: string | null;
+  captured_at: string | null;
+  folder_path: string | null;
+  lat: number | null;
+  lon: number | null;
   has_ocr: boolean;
   has_gps: boolean;
   is_duplicate: boolean;
   thumbnail_url: string | null;
   width: number | null;
   height: number | null;
+  scene_label: string | null;
+  place_label: string | null;
+  object_labels: string[];
+  tags: string[];
+  summary: string | null;
+  extraction_status: string | null;
+  confidence_label: string | null;
+  review_bucket: string | null;
 }
 
 export interface AssetListResponse {
@@ -59,20 +71,61 @@ export interface AssetDetail {
   thumbnail_url: string | null;
   large_thumbnail_url: string | null;
   keyframe_urls: string[];
-  temporal: { best_timestamp: string | null; source: string | null; has_conflict: boolean } | null;
+  temporal: {
+    best_timestamp: string | null;
+    source: string | null;
+    confidence: string | null;
+    has_conflict: boolean;
+    exif_datetime: string | null;
+    gps_datetime: string | null;
+    filesystem_mtime: string | null;
+    video_creation_time: string | null;
+  } | null;
   location: { lat: number | null; lon: number | null; altitude: number | null } | null;
   media_info: MediaInfo | null;
   ocr_text: string | null;
-  scene: { setting: string | null; time_of_day: string | null; weather: string | null; description: string | null } | null;
-  objects: { label: string; confidence: number | null; count: number | null }[];
-  place_candidates: { name: string | null; country: string | null; region: string | null; place_type: string | null; confidence: number | null }[];
+  scene: { setting: string | null; time_of_day: string | null; weather: string | null; description: string | null; confidence: number | null } | null;
+  objects: { label: string; confidence: number | null; count: number | null; color: string | null; details: string[] }[];
+  place_candidates: { name: string | null; country: string | null; region: string | null; place_type: string | null; confidence: number | null; source: string | null }[];
+  summary: string | null;
+  tags: string[];
+  tag_details: { label: string; confidence: number | null }[];
+  artistic_notes: {
+    summary: string | null;
+    composition: string | null;
+    lighting: string | null;
+    detail: string | null;
+    resolution: string | null;
+  } | null;
+  extraction_notes: string | null;
+  series: {
+    label: string;
+    count: number;
+    items: { id: string; filename: string; captured_at: string | null }[];
+  } | null;
   extraction_status: string | null;
+  extraction_run: {
+    id: string;
+    model_provider: string | null;
+    model_name: string | null;
+    prompt_version: string | null;
+    schema_version: string | null;
+    status: string;
+    started_at: string | null;
+    finished_at: string | null;
+    tokens_in: number | null;
+    tokens_out: number | null;
+    cost_usd: number | null;
+    error_message: string | null;
+    debug_stage: string | null;
+    debug_excerpt: string | null;
+  } | null;
 }
 
 export interface JobOut {
   id: string;
   type: string;
-  status: "queued" | "running" | "done" | "failed";
+  status: "queued" | "running" | "done" | "failed" | "cancelled";
   started_at: string;
   finished_at: string | null;
   message: string | null;
@@ -103,27 +156,105 @@ export interface CostStats {
   avg_cost_per_run_usd: number;
 }
 
+export interface ReviewQueue {
+  name: string;
+  label: string;
+  description: string;
+  count: number;
+  items: AssetListItem[];
+}
+
+export interface ReviewQueueResponse {
+  queues: ReviewQueue[];
+}
+
+export interface FolderItem {
+  path: string;
+  count: number;
+}
+
+export interface FolderResponse {
+  items: FolderItem[];
+}
+
 
 
 export const api = {
   assets: {
-    list: (params?: { page?: number; page_size?: number; type?: string; q?: string }) => {
+    list: (params?: {
+      page?: number;
+      page_size?: number;
+      type?: string;
+      q?: string;
+      ai_text?: string;
+      scene?: string;
+      place?: string;
+      object?: string;
+      folder?: string;
+      has_ocr?: boolean;
+      has_gps?: boolean;
+      has_ai?: boolean;
+      review_bucket?: string;
+    }) => {
       const qs = new URLSearchParams();
       if (params?.page) qs.set("page", String(params.page));
       if (params?.page_size) qs.set("page_size", String(params.page_size));
       if (params?.type) qs.set("type", params.type);
       if (params?.q) qs.set("q", params.q);
+      if (params?.ai_text) qs.set("ai_text", params.ai_text);
+      if (params?.scene) qs.set("scene", params.scene);
+      if (params?.place) qs.set("place", params.place);
+      if (params?.object) qs.set("object", params.object);
+      if (params?.folder) qs.set("folder", params.folder);
+      if (params?.has_ocr) qs.set("has_ocr", "true");
+      if (params?.has_gps) qs.set("has_gps", "true");
+      if (params?.has_ai) qs.set("has_ai", "true");
+      if (params?.review_bucket) qs.set("review_bucket", params.review_bucket);
       return apiFetch<AssetListResponse>(`/assets?${qs}`);
     },
     get: (id: string) => apiFetch<AssetListItem>(`/assets/${id}`),
     detail: (id: string) => apiFetch<AssetDetail>(`/assets/${id}/detail`),
+    reviewQueues: () => apiFetch<ReviewQueueResponse>("/assets/review/queues"),
+    resetMetadata: (folder_path: string) =>
+      apiFetch<{ folder_path: string; asset_count: number }>("/assets/reset-metadata", {
+        method: "POST",
+        body: JSON.stringify({ folder_path }),
+      }),
+    folders: (params?: {
+      type?: string;
+      q?: string;
+      ai_text?: string;
+      scene?: string;
+      place?: string;
+      object?: string;
+      folder?: string;
+      has_ocr?: boolean;
+      has_gps?: boolean;
+      has_ai?: boolean;
+      review_bucket?: string;
+    }) => {
+      const qs = new URLSearchParams();
+      if (params?.type) qs.set("type", params.type);
+      if (params?.q) qs.set("q", params.q);
+      if (params?.ai_text) qs.set("ai_text", params.ai_text);
+      if (params?.scene) qs.set("scene", params.scene);
+      if (params?.place) qs.set("place", params.place);
+      if (params?.object) qs.set("object", params.object);
+      if (params?.folder) qs.set("folder", params.folder);
+      if (params?.has_ocr) qs.set("has_ocr", "true");
+      if (params?.has_gps) qs.set("has_gps", "true");
+      if (params?.has_ai) qs.set("has_ai", "true");
+      if (params?.review_bucket) qs.set("review_bucket", params.review_bucket);
+      return apiFetch<FolderResponse>(`/assets/folders?${qs}`);
+    },
   },
 
   jobs: {
     list: () => apiFetch<JobOut[]>("/jobs"),
     get: (id: string) => apiFetch<JobOut>(`/jobs/${id}`),
-    startIngest: (body: { type: string; source_root?: string }) =>
+    startIngest: (body: { type: string; source_root?: string; asset_ids?: string[] }) =>
       apiFetch<JobOut>("/jobs/ingest", { method: "POST", body: JSON.stringify(body) }),
+    stop: (id: string) => apiFetch<JobOut>(`/jobs/${id}/stop`, { method: "POST" }),
     costStats: () => apiFetch<CostStats>("/jobs/extraction/cost-stats"),
   },
 

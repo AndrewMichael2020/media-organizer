@@ -1,4 +1,4 @@
-# Forensic Media Organizer
+# Media Archive Tool
 
 A private local-first forensic-grade media organizer for large photo and video archives.
 
@@ -87,6 +87,48 @@ model:
 ```
 
 All values can also be overridden with `FMO_` env vars (e.g. `FMO_MODEL_NAME`).
+
+### AI cost controls
+
+The default extraction flow now aims to keep output much shorter than before:
+
+- `worker.ai_max_output_tokens`: caps model output size
+- `worker.image_analysis_max_px`: controls how large the analysis image sent to Gemini can be
+
+Default values in `config/default.yaml` are tuned for a cheaper balanced mode:
+
+```yaml
+worker:
+  image_analysis_max_px: 1200
+  ai_max_output_tokens: 320
+```
+
+If you want the cheapest possible pass, lower `ai_max_output_tokens` first. That reduces cost faster than shrinking the image too aggressively.
+
+### NEF / RAW files
+
+`NEF` and other RAW files are supported, but there is an important tradeoff:
+
+- RAW decoding through generic image libraries often produces soft or poor previews
+- many cameras embed a JPEG preview inside the RAW file, and that preview is usually the best source for thumbnails
+- this app now prefers the embedded preview via `exiftool` when generating RAW thumbnails
+
+Recommended workflow for RAW-heavy archives:
+
+- run `reprocess` again after pulling the latest code so new sharper RAW thumbnails are generated
+- keep `exiftool` installed
+- expect some RAW files to still need special handling if the camera did not embed a usable preview
+
+If you see a specific NEF file that still looks bad after reprocessing, that usually means the embedded preview is missing or unusually small. In that case the next step would be adding a dedicated RAW decoder such as `rawpy`.
+
+### HEIC / Apple image formats
+
+`HEIC` and `HEIF` are supported.
+
+- on macOS, thumbnail and AI-prep fallback now uses `sips` when direct decoding is unreliable
+- this makes Apple formats much more dependable without forcing a full library conversion
+
+If a folder previously showed many HEIC extraction failures, rerun `reprocess` and then `extract` on that folder.
 
 ---
 
@@ -182,6 +224,9 @@ curl -X POST http://localhost:8000/jobs/ingest \
 - [x] Extraction schemas + `prompts/image_v1.txt` (Issues 5.2–5.3)
 - [x] AI image extraction pipeline — validate → persist OCR/scene/objects/places (Issue 6.1–6.3)
 - [x] Full-text search wired in gallery filter bar (Issue 8.2)
+- [x] Structured gallery filters for scene, place, object, and folder browsing
+- [x] Folder browser in gallery for nested archive navigation
+- [x] Cleaner asset detail page with AI summary, image notes, and series grouping
 
 ## What's next
 
@@ -190,3 +235,4 @@ curl -X POST http://localhost:8000/jobs/ingest \
 - [ ] Video extraction — keyframe-level AI extraction (Issue 6.4)
 - [ ] Person region persistence + clustering (Issue 6.2)
 - [ ] Full Assertion audit trail UI (Issue 10.x)
+- [ ] Dedicated RAW fallback decoder for edge-case NEF files without a strong embedded preview

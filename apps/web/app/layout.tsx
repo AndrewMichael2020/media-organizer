@@ -1,22 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { AppShell } from "@/components/layout/app-shell";
 
-const geist = Geist({
-  subsets: ["latin"],
-  variable: "--font-geist",
-});
-
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-geist-mono",
-});
-
 export const metadata: Metadata = {
-  title: "Forensic Media Organizer",
-  description: "Private local-first media archive and evidence system",
+  title: "Media Archive Tool",
+  description: "Private local-first media archive search tool",
 };
 
 export default function RootLayout({
@@ -24,7 +13,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geist.variable} ${geistMono.variable}`}>
+      <body>
         <ThemeProvider
           attribute="class"
           defaultTheme="light"

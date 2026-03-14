@@ -9,6 +9,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from sqlalchemy.orm import Session
 
@@ -172,23 +173,30 @@ def _persist_location(session, asset, exif):
         ))
 
 
-def enrich_all_pending(limit: int = 200) -> tuple[int, int]:
+def enrich_all_pending(
+    limit: int = 200,
+    folder_path: str | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> tuple[int, int, bool]:
     """Enrich assets that don't yet have media_info. Returns (done, errors)."""
     done = errors = 0
+    cancelled = False
     with get_session() as session:
         from sqlalchemy import select
         from models import Asset, AssetMediaInfo
         enriched_ids = select(AssetMediaInfo.asset_id)
-        assets = session.scalars(
-            select(Asset)
-            .where(Asset.id.not_in(enriched_ids), Asset.is_missing == False)  # noqa: E712
-            .limit(limit)
-        ).all()
+        q = select(Asset).where(Asset.id.not_in(enriched_ids), Asset.is_missing == False)  # noqa: E712
+        if folder_path:
+            q = q.where((Asset.canonical_path == folder_path) | (Asset.canonical_path.like(f"{folder_path}/%")))
+        assets = session.scalars(q.limit(limit)).all()
         for asset in assets:
+            if should_cancel and should_cancel():
+                cancelled = True
+                break
             try:
                 enrich_asset(session, asset)
                 done += 1
             except Exception as exc:
                 logger.warning("Enrich failed %s: %s", asset.canonical_path, exc)
                 errors += 1
-    return done, errors
+    return done, errors, cancelled

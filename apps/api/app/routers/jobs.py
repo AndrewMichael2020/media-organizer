@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -12,6 +13,7 @@ from app.core.db import get_session
 
 router = APIRouter(tags=["jobs"])
 logger = logging.getLogger(__name__)
+_CANCELLED_JOBS: set[str] = set()
 
 
 class JobType(str, Enum):
@@ -26,6 +28,7 @@ class JobStatus(str, Enum):
     running = "running"
     done = "done"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class JobOut(BaseModel):
@@ -102,6 +105,21 @@ async def start_ingest(req: StartJobRequest, background_tasks: BackgroundTasks) 
         return _job_to_out(job)
 
 
+@router.post("/{job_id}/stop", response_model=JobOut)
+async def stop_job(job_id: str) -> JobOut:
+    from models import JobRun
+
+    with get_session() as session:
+        job = session.get(JobRun, job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.status not in ("queued", "running"):
+            return _job_to_out(job)
+        _CANCELLED_JOBS.add(job_id)
+        job.message = "Stop requested..."
+        return _job_to_out(job)
+
+
 class CostStats(BaseModel):
     total_runs: int
     total_tokens_in: int
@@ -146,6 +164,9 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
     from models import JobRun
     from datetime import timezone
 
+    def _cancelled() -> bool:
+        return job_id in _CANCELLED_JOBS
+
     def _update(status: str, message: str = ""):
         with get_session() as s:
             j = s.get(JobRun, job_id)
@@ -154,17 +175,20 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
                 j.message = message
                 if status in ("done", "failed"):
                     j.finished_at = datetime.now(timezone.utc)
+                if status == "cancelled":
+                    j.finished_at = datetime.now(timezone.utc)
 
     _update("running", f"Starting {req.type.value}…")
     try:
+        scoped = str(Path(req.source_root).expanduser().resolve()) if req.source_root else None
         if req.type == JobType.scan:
             from scanner import scan_source_root
             result = await asyncio.to_thread(scan_source_root, req.source_root or "")
             _update("done", f"Scan done — {result.new} new, {result.updated} updated, {result.found} found")
         elif req.type == JobType.enrich:
             from enrichment import enrich_all_pending
-            done, errors = await asyncio.to_thread(enrich_all_pending)
-            _update("done", f"Enriched {done} assets ({errors} errors)")
+            done, errors, cancelled = await asyncio.to_thread(enrich_all_pending, 200, scoped, _cancelled)
+            _update("cancelled" if cancelled else "done", f"Enriched {done} assets ({errors} errors)")
         elif req.type == JobType.extract:
             sys.path.insert(0, str(_repo / "packages" / "vision"))
             sys.path.insert(0, str(_repo / "packages" / "models"))
@@ -174,15 +198,31 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
                 extract_all_pending,
                 settings.model_provider,
                 settings.model_name,
+                50,
+                settings.worker_image_analysis_max_px,
+                settings.worker_ai_max_output_tokens,
+                scoped,
+                _cancelled,
             )
-            _update("done", f"Extracted {stats['processed']} assets ({stats['failed']} failed, {stats['skipped']} skipped)")
+            detail = ""
+            if stats.get("failure_examples"):
+                detail = " | " + " ; ".join(stats["failure_examples"])
+            _update(
+                "cancelled" if stats.get("cancelled") else "done",
+                f"Extracted {stats['processed']} assets ({stats['failed']} failed, {stats['skipped']} skipped){detail}"
+            )
         elif req.type == JobType.reprocess:
             from thumbnails import generate_all_pending
             from app.core.config import settings
-            stats = await asyncio.to_thread(generate_all_pending, settings.derivative_cache_root)
-            _update("done", f"Thumbnails done — {stats['processed']} generated, {stats['skipped']} skipped, {stats['failed']} failed")
+            stats = await asyncio.to_thread(generate_all_pending, settings.derivative_cache_root, scoped, _cancelled)
+            _update(
+                "cancelled" if stats.get("cancelled") else "done",
+                f"Thumbnails done — {stats['processed']} generated, {stats['skipped']} skipped, {stats['failed']} failed"
+            )
         else:
             _update("done", f"{req.type.value} not implemented")
     except Exception as exc:
         logger.exception("Job %s failed", job_id)
         _update("failed", str(exc))
+    finally:
+        _CANCELLED_JOBS.discard(job_id)

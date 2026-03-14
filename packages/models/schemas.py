@@ -32,6 +32,8 @@ class ObjectDetection(BaseModel):
     confidence: float = Field(ge=0, le=1)
     bbox: BoundingBox | None = None
     count: int = 1
+    color: str | None = None
+    details: list[str] = Field(default_factory=list)
 
 
 class PlaceCandidate(BaseModel):
@@ -52,10 +54,27 @@ class SceneSummary(BaseModel):
     description: str                    # 2–4 sentence narrative
 
 
+class ArtisticNotes(BaseModel):
+    summary: str | None = None
+    composition: str | None = None
+    lighting: str | None = None
+    detail: str | None = None
+    resolution: str | None = None
+
+
+class SearchTag(BaseModel):
+    label: str
+    confidence: float = Field(ge=0, le=1, default=0.7)
+
+
 class ImageExtractionOutput(BaseModel):
     schema_version: str = SCHEMA_VERSION
     ocr_text: str | None = None          # verbatim visible text from image
+    short_summary: str | None = None
+    search_tags: list[str] = Field(default_factory=list)
+    search_tag_details: list[SearchTag] = Field(default_factory=list)
     scene: SceneSummary
+    artistic_notes: ArtisticNotes | None = None
     objects: list[ObjectDetection] = Field(default_factory=list)
     place_candidates: list[PlaceCandidate] = Field(default_factory=list)
     person_regions: list[PersonRegion] = Field(default_factory=list)

@@ -1027,6 +1027,13 @@ The inspection page should show:
 - review actions
 - reprocess actions
 
+Practical implementation note for Version 1:
+
+- RAW formats such as `NEF` should use embedded camera previews for thumbnails when possible,
+- some RAW files may still need a dedicated decoder later if preview quality is poor,
+- AI extraction cost should be reduced first by keeping outputs compact and capped,
+- image downscaling should stay conservative enough to preserve small text and brand details.
+
 ### 18.5 Review experience
 
 The review UI should let the user:

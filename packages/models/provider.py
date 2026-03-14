@@ -17,7 +17,13 @@ class GenerationResult:
 
 class ModelProvider(ABC):
     @abstractmethod
-    def generate(self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> GenerationResult:
+    def generate(
+        self,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+        max_output_tokens: int | None = None,
+    ) -> GenerationResult:
         """Send a prompt + image and return a GenerationResult with text and token counts."""
         ...
 

@@ -14,3 +14,5 @@ storage:
 
 worker:
   concurrency: 2
+  image_analysis_max_px: 1200
+  ai_max_output_tokens: null

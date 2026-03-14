@@ -65,6 +65,8 @@ class Settings(BaseSettings):
 
     # Worker
     worker_concurrency: int = 2
+    worker_image_analysis_max_px: int = 1200
+    worker_ai_max_output_tokens: int | None = None
 
     def model_post_init(self, _context: object) -> None:
         """Overlay YAML config values that aren't set via env."""

@@ -27,16 +27,16 @@ export function Sidebar() {
   const { theme, setTheme } = useTheme();
 
   return (
-    <aside className="flex flex-col h-full w-14 border-r border-[hsl(var(--border))] bg-[hsl(var(--surface))] shrink-0 z-20">
-      {/* Logo mark */}
-      <div className="h-11 flex items-center justify-center border-b border-[hsl(var(--border-subtle))]">
-        <span className="text-[11px] font-semibold tracking-[0.2em] text-[hsl(var(--muted))] uppercase select-none">
-          FMO
-        </span>
+    <aside className="z-20 flex min-h-screen w-[var(--sidebar-width)] shrink-0 flex-col border-r border-[hsl(var(--border))] bg-[linear-gradient(180deg,hsl(var(--surface)),hsl(var(--surface-raised)))]">
+      <div className="border-b border-[hsl(var(--border-subtle))] px-3 py-4">
+        <p className="text-[10px] uppercase tracking-[0.28em] text-[hsl(var(--muted))]">Media</p>
+        <p className="mt-2 font-display text-xl leading-none text-[hsl(var(--foreground))]">Archive Tool</p>
+        <p className="mt-1 text-[10px] leading-relaxed text-[hsl(var(--muted-foreground))]">
+          Local-first photo archive workspace
+        </p>
       </div>
 
-      {/* Nav icons */}
-      <nav className="flex flex-col gap-0.5 p-1.5 flex-1 pt-3">
+      <nav className="flex flex-1 flex-col gap-1 p-2 pt-4">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href);
           return (
@@ -45,32 +45,31 @@ export function Sidebar() {
               href={href}
               title={label}
               className={cn(
-                "flex flex-col items-center gap-1 py-2.5 px-1 rounded-md transition-colors group",
+                "group flex flex-col items-center gap-1 rounded-[1.1rem] px-1 py-3 transition-colors",
                 active
-                  ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"
-                  : "text-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--surface-raised))]"
+                  ? "bg-[hsl(var(--accent-strong))] text-[hsl(var(--accent-foreground))] shadow-[0_20px_40px_-24px_rgba(0,0,0,0.55)]"
+                  : "text-[hsl(var(--muted))] hover:bg-[hsl(var(--surface-strong))] hover:text-[hsl(var(--foreground))]"
               )}
             >
               <Icon size={16} strokeWidth={1.5} />
-              <span className="text-[9px] tracking-wide uppercase font-medium">{label}</span>
+              <span className="text-[9px] uppercase tracking-[0.18em] font-medium">{label}</span>
             </Link>
           );
         })}
       </nav>
 
-      {/* Theme toggle */}
-      <div className="p-1.5 pb-3">
+      <div className="border-t border-[hsl(var(--border-subtle))] p-2 pb-3">
         <button
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           title="Toggle theme"
-          className="w-full flex flex-col items-center gap-1 py-2.5 px-1 rounded-md text-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--surface-raised))] transition-colors"
+          className="flex w-full flex-col items-center gap-1 rounded-[1.1rem] px-1 py-3 text-[hsl(var(--muted))] transition-colors hover:bg-[hsl(var(--surface-strong))] hover:text-[hsl(var(--foreground))]"
         >
           {theme === "dark" ? (
             <SunMedium size={16} strokeWidth={1.5} />
           ) : (
             <Moon size={16} strokeWidth={1.5} />
           )}
-          <span className="text-[9px] tracking-wide uppercase font-medium">Theme</span>
+          <span className="text-[9px] uppercase tracking-[0.18em] font-medium">Theme</span>
         </button>
       </div>
     </aside>
