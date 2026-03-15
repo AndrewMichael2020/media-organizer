@@ -12,6 +12,16 @@ The originals stay where they already live on disk. The app layers metadata, thu
 - Runs AI extraction for OCR, summaries, tags, objects, place clues, and image notes
 - Provides a local web app with Gallery, Places, Review, Jobs, and Settings
 - Supports folder-scoped jobs so you can process one part of the archive at a time
+- Supports local model inferencing
+
+## What It Does Not Do
+
+- Runs on MacOS as a native app (but the web UI is designed for local use)
+- Syncs or manages files on disk (it catalogs and layers metadata only)
+- Provides a mobile app (but the web UI is responsive)
+- Supports multi-user access or cloud deployment (but the API could be adapted for that in the future)
+- Has CI/CD for cloud deployment (but the stack is containerized and could be adapted for that in the future)
+- Has ideal UI/UX (but it is designed to be practical and iteratively improved)
 
 ## Current Focus
 
@@ -31,7 +41,7 @@ This project is optimized for local archive exploration, not cloud multi-user de
 
 ![Spacial analysis](public/image-3.png)
 
-![Jobs](public/image-4.png)
+![Jobs (pick local or remote AI model)](public/image-4.png)
 
 ![Settings (enumerate folder, delete all artifact repos, etc.)](public/image-5.png)
 
