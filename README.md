@@ -1,7 +1,6 @@
 # Media Archive Tool
 
 <!-- Intent -->
-[![Metadata Focus](https://img.shields.io/badge/Forensic-Metadata%20Extraction-2F4F4F?style=flat-square&logo=files&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
 [![AI-Powered](https://img.shields.io/badge/AI--Powered-Multimodal%20Extraction-7B2FBE?style=flat-square&logo=google&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
 [![Local-First](https://img.shields.io/badge/Local--First-No%20Cloud%20Required-228B22?style=flat-square&logo=homeassistant&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
 [![Original Images Untouched](https://img.shields.io/badge/Originals-Never%20Moved%20or%20Copied-FF8C00?style=flat-square&logo=lock&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
