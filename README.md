@@ -20,7 +20,7 @@ The originals stay where they already live on disk. The app layers metadata, thu
 - Syncs or manages files on disk (it catalogs and layers metadata only)
 - Provides a mobile app (but the web UI is responsive)
 - Supports multi-user access or cloud deployment (but the API could be adapted for that in the future)
-- Has CI/CD for cloud deployment (but the stack is containerized and could be adapted for that in the future)
+- Has CI/CD for cloud deployment (but the stack is containerized and could be adapted for that in the future; PostgrSQL was a poor choice))
 - Has ideal UI/UX (but it is designed to be practical and iteratively improved)
 - Has face detection (but it has people recognition and general object detection pipeline; face detection is next stage)
 - Has image series deep analysis
