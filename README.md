@@ -1,5 +1,42 @@
 # Media Archive Tool
 
+<!-- OSINT / Forensic Intent -->
+[![OSINT-Style Analysis](https://img.shields.io/badge/OSINT--Style-Image%20Analysis-8B0000?style=flat-square&logo=target&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![Forensic Metadata](https://img.shields.io/badge/Forensic-Metadata%20Extraction-2F4F4F?style=flat-square&logo=files&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![AI-Powered](https://img.shields.io/badge/AI--Powered-Multimodal%20Extraction-7B2FBE?style=flat-square&logo=google&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![Local-First](https://img.shields.io/badge/Local--First-No%20Cloud%20Required-228B22?style=flat-square&logo=homeassistant&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![Originals Untouched](https://img.shields.io/badge/Originals-Never%20Moved%20or%20Copied-FF8C00?style=flat-square&logo=lock&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+
+<!-- Backend Stack -->
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3120/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.135+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Pydantic v2](https://img.shields.io/badge/Pydantic-v2-E92063?style=flat-square&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/latest/)
+[![SQLAlchemy 2](https://img.shields.io/badge/SQLAlchemy-2.0-D71F00?style=flat-square&logo=sqlalchemy&logoColor=white)](https://www.sqlalchemy.org/)
+[![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Alembic](https://img.shields.io/badge/Alembic-Migrations-6BA539?style=flat-square&logo=alembic&logoColor=white)](https://alembic.sqlalchemy.org/)
+
+<!-- Frontend Stack -->
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![React 19](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+
+<!-- AI & Deterministic Tools -->
+[![Gemini Flash-Lite](https://img.shields.io/badge/Gemini-Flash--Lite%20(default)-4285F4?style=flat-square&logo=google&logoColor=white)](https://deepmind.google/technologies/gemini/)
+[![LM Studio](https://img.shields.io/badge/LM%20Studio-Local%20Inference-8A2BE2?style=flat-square&logo=ollama&logoColor=white)](https://lmstudio.ai/)
+[![ExifTool](https://img.shields.io/badge/ExifTool-Metadata-DAA520?style=flat-square&logo=files&logoColor=white)](https://exiftool.org/)
+[![FFmpeg](https://img.shields.io/badge/FFmpeg-Video%20%2F%20Audio-007808?style=flat-square&logo=ffmpeg&logoColor=white)](https://ffmpeg.org/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+
+<!-- Engineering Practices -->
+[![Typed Schemas](https://img.shields.io/badge/Typed-Pydantic%20Schemas-E92063?style=flat-square&logo=checkmarx&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![Idempotent Pipelines](https://img.shields.io/badge/Pipelines-Idempotent%20%26%20Restartable-F59E0B?style=flat-square&logo=apacheairflow&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![Evidence Trail](https://img.shields.io/badge/Evidence-Full%20Extraction%20Trail-8B4513?style=flat-square&logo=microscope&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![Reprocessing](https://img.shields.io/badge/Reprocessing-First--Class%20Feature-1E90FF?style=flat-square&logo=refresh&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![macOS](https://img.shields.io/badge/Primary%20Target-macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://www.apple.com/macos/)
+
+---
+
 Local-first archive software for large personal photo collections.
 
 The originals stay where they already live on disk. The app layers metadata, thumbnails, OCR, AI summaries, tags, places, and review queues on top so you can browse and search a big archive without reorganizing the files themselves.
