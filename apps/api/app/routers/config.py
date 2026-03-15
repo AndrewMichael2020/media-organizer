@@ -35,6 +35,7 @@ class ConfigSnapshot(BaseModel):
     derivative_cache_root: str
     model_provider: str
     model_name: str
+    deepinfra_base_url: str
     lmstudio_base_url: str
     default_model_profile_key: str
     model_profiles: list["ModelProfile"]
@@ -86,6 +87,7 @@ async def get_config() -> ConfigSnapshot:
         derivative_cache_root=settings.derivative_cache_root,
         model_provider=settings.model_provider,
         model_name=settings.model_name,
+        deepinfra_base_url=settings.deepinfra_base_url,
         lmstudio_base_url=settings.lmstudio_base_url,
         default_model_profile_key="gemini-25-flash-lite-batch",
         model_profiles=[
@@ -115,6 +117,24 @@ async def get_config() -> ConfigSnapshot:
                 kind="cloud",
                 execution_mode="standard",
                 image_max_px=1200,
+            ),
+            ModelProfile(
+                key="deepinfra-llama32-11b",
+                label=f"DeepInfra · {settings.deepinfra_default_model}",
+                provider="deepinfra",
+                model_name=settings.deepinfra_default_model,
+                kind="cloud",
+                execution_mode="standard",
+                image_max_px=1200,
+            ),
+            ModelProfile(
+                key="deepinfra-llama32-11b-batch",
+                label=f"DeepInfra · {settings.deepinfra_default_model} (app batch)",
+                provider="deepinfra",
+                model_name=settings.deepinfra_default_model,
+                kind="cloud",
+                execution_mode="batch",
+                image_max_px=768,
             ),
             ModelProfile(
                 key="lmstudio-gemma-27b",

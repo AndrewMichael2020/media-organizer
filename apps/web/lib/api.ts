@@ -161,6 +161,7 @@ export interface ConfigSnapshot {
   derivative_cache_root: string;
   model_provider: string;
   model_name: string;
+  deepinfra_base_url: string;
   lmstudio_base_url: string;
   default_model_profile_key: string;
   model_profiles: {

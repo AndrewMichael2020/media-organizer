@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     # Model
     model_provider: str = "gemini"
     model_name: str = "gemini-3.1-flash-lite-preview"
+    deepinfra_base_url: str = "https://api.deepinfra.com/v1/openai"
+    deepinfra_default_model: str = "meta-llama/Llama-3.2-11B-Vision-Instruct"
     lmstudio_base_url: str = "http://127.0.0.1:1234/v1"
     lmstudio_default_model: str = "google/gemma-3-27b"
 
@@ -69,6 +71,8 @@ class Settings(BaseSettings):
     worker_concurrency: int = 2
     worker_image_analysis_max_px: int = 1200
     worker_ai_max_output_tokens: int | None = None
+    worker_batch_chunk_size: int = 100
+    worker_batch_max_concurrent: int = 100
 
     def model_post_init(self, _context: object) -> None:
         """Overlay YAML config values that aren't set via env."""

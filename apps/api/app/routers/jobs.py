@@ -231,11 +231,14 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
             from image_extractor import extract_all_pending, extract_all_pending_batch
             from app.core.config import settings
             await _ensure_assets_for_scope(scoped)
-            if req.execution_mode == "batch" and (req.model_provider or settings.model_provider) == "gemini":
+            provider_name = req.model_provider or settings.model_provider
+            model_name = req.model_name or settings.model_name
+            batch_limit = settings.worker_batch_chunk_size if req.execution_mode == "batch" else 50
+            if req.execution_mode == "batch" and provider_name == "gemini":
                 stats = await asyncio.to_thread(
                     extract_all_pending_batch,
-                    req.model_name or settings.model_name,
-                    50,
+                    model_name,
+                    batch_limit,
                     min(settings.worker_image_analysis_max_px, 768),
                     settings.worker_ai_max_output_tokens,
                     scoped,
@@ -244,14 +247,20 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
             else:
                 stats = await asyncio.to_thread(
                     extract_all_pending,
-                    req.model_provider or settings.model_provider,
-                    req.model_name or settings.model_name,
-                    50,
-                    settings.worker_image_analysis_max_px,
+                    provider_name,
+                    model_name,
+                    batch_limit,
+                    min(settings.worker_image_analysis_max_px, 768) if req.execution_mode == "batch" else settings.worker_image_analysis_max_px,
                     settings.worker_ai_max_output_tokens,
                     scoped,
                     _cancelled,
+                    req.execution_mode or "standard",
+                    60 if req.execution_mode == "batch" else 85,
+                    settings.worker_batch_chunk_size,
+                    settings.worker_batch_max_concurrent,
                 )
+                if req.execution_mode == "batch" and provider_name != "gemini":
+                    stats["mode_note"] = "Used app-side batch mode with the lower-cost image profile"
             detail = ""
             if stats.get("failure_examples"):
                 detail = " | " + " ; ".join(stats["failure_examples"])

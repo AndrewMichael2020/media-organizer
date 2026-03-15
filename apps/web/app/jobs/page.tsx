@@ -136,6 +136,20 @@ export default function JobsPage() {
     }
   }
 
+  const selectedProfile = cfg?.model_profiles.find((item) => item.key === selectedModelKey) ?? null;
+  const selectedProfileNote = selectedProfile
+    ? selectedProfile.provider === "lmstudio"
+      ? ` via ${cfg?.lmstudio_base_url}`
+      : selectedProfile.provider === "deepinfra"
+        ? ` via ${cfg?.deepinfra_base_url}`
+        : ""
+    : "";
+  const executionNote = selectedProfile?.execution_mode === "batch"
+    ? selectedProfile?.provider === "gemini"
+      ? " with the Gemini Batch API and a lower-cost 768px input profile."
+      : " with app-side folder batching and a lower-cost 768px input profile."
+    : ".";
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -197,10 +211,10 @@ export default function JobsPage() {
           <p className="mb-3 text-[11px] text-[hsl(var(--muted-foreground))]">
             AI extraction will use{" "}
             <span className="font-medium text-[hsl(var(--foreground))]">
-              {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.label ?? "the selected model"}
+              {selectedProfile?.label ?? "the selected model"}
             </span>
-            {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.provider === "lmstudio" ? ` via ${cfg.lmstudio_base_url}` : ""}
-            {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.execution_mode === "batch" ? " with the Gemini Batch API and a lower-cost 768px input profile." : "."}
+            {selectedProfileNote}
+            {executionNote}
           </p>
         ) : null}
         {errorMessage ? (

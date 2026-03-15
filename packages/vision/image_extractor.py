@@ -39,7 +39,7 @@ from sqlalchemy import delete as sa_delete  # noqa: E402
 # Model router + schemas (same package dir pattern as other packages)
 sys.path.insert(0, str(Path(__file__).parents[2] / "models"))
 from router import get_provider  # noqa: E402
-from provider import ModelProvider  # noqa: E402
+from provider import BatchGenerationRequest, BatchGenerationResult, ModelProvider  # noqa: E402
 from schemas import ImageExtractionOutput, SCHEMA_VERSION  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,8 @@ _PRICING_PER_M_TOKENS: dict[tuple[str, str], tuple[float, float]] = {
     ("gemini-2.5-flash", "batch"): (0.075, 0.625),
     ("gemini-3.1-flash-lite-preview", "standard"): (0.25, 1.50),
     ("gemini-3.1-flash-lite-preview", "batch"): (0.125, 0.75),
+    ("meta-llama/Llama-3.2-11B-Vision-Instruct", "standard"): (0.049, 0.049),
+    ("meta-llama/Llama-3.2-11B-Vision-Instruct", "batch"): (0.049, 0.049),
 }
 
 
@@ -69,7 +71,10 @@ def _calculate_cost(
     model_name: str,
     execution_mode: str = "standard",
     provider_name: str = "gemini",
+    provider_cost_usd: float | None = None,
 ) -> float:
+    if provider_cost_usd is not None:
+        return provider_cost_usd
     if (provider_name or "").strip().lower() == "lmstudio":
         return 0.0
 
@@ -798,6 +803,132 @@ def _build_extraction_run(asset: Asset, provider_name: str, model_name: str, exe
     )
 
 
+def _supports_app_batch(provider: ModelProvider) -> bool:
+    return provider.__class__.generate_batch is not ModelProvider.generate_batch
+
+
+def _chunked(items: list, size: int) -> list[list]:
+    size = max(1, size)
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _prepare_app_batch_requests(
+    session: Session,
+    assets: list[Asset],
+    *,
+    max_px: int,
+    jpeg_quality: int,
+    max_output_tokens: int | None,
+    should_cancel: Callable[[], bool] | None,
+    stats: dict[str, int],
+    failure_examples: list[str],
+) -> tuple[list[Asset], list[BatchGenerationRequest]]:
+    prompt_template = _load_prompt()
+    prepared_assets: list[Asset] = []
+    requests: list[BatchGenerationRequest] = []
+    for asset in assets:
+        if should_cancel and should_cancel():
+            stats["cancelled"] = 1
+            break
+        ext = Path(asset.canonical_path).suffix.lower()
+        if ext not in SUPPORTED_IMAGE_EXT:
+            stats["skipped"] += 1
+            continue
+        path = Path(asset.canonical_path)
+        if not path.exists():
+            stats["failed"] += 1
+            if len(failure_examples) < 3:
+                failure_examples.append(f"{asset.filename}: File not found on disk")
+            continue
+        try:
+            img_bytes, mime = _resolve_image_bytes(asset, path, max_px=max_px, jpeg_quality=jpeg_quality)
+            prompt = prompt_template + _ocr_context_prompt(session, asset.id) + _user_context_prompt(session, asset.id)
+            prepared_assets.append(asset)
+            requests.append(
+                BatchGenerationRequest(
+                    prompt=prompt,
+                    image_bytes=img_bytes,
+                    mime_type=mime,
+                    max_output_tokens=max_output_tokens,
+                    metadata={"asset_id": asset.id, "filename": asset.filename},
+                )
+            )
+        except Exception as exc:
+            logger.exception("Failed to prepare batch request for %s", asset.id)
+            stats["failed"] += 1
+            if len(failure_examples) < 3:
+                failure_examples.append(f"{asset.filename}: {str(exc)[:180]}")
+    return prepared_assets, requests
+
+
+def _persist_app_batch_results(
+    session: Session,
+    provider: ModelProvider,
+    assets: list[Asset],
+    results: list[BatchGenerationResult],
+    *,
+    execution_mode: str,
+    stats: dict[str, int],
+    failure_examples: list[str],
+) -> None:
+    asset_map = {asset.id: asset for asset in assets}
+    for item in results:
+        metadata = item.metadata or {}
+        asset_id = metadata.get("asset_id")
+        if not asset_id or asset_id not in asset_map:
+            continue
+        asset = asset_map[asset_id]
+        run = _build_extraction_run(asset, provider.provider_name, provider.model_name, execution_mode)
+        session.add(run)
+        session.flush()
+        raw_text = ""
+        try:
+            if item.error_message:
+                raise RuntimeError(item.error_message)
+            if item.result is None:
+                raise RuntimeError("Provider returned no result")
+            raw_text = item.result.text or ""
+            raw_json = _parse_json_from_response(raw_text)
+            output = _normalize_output(ImageExtractionOutput.model_validate(raw_json))
+            _write_ai_debug_dump(asset, stage="done", raw_text=raw_text, parsed_json=raw_json)
+            run.raw_output = output.model_dump()
+            run.tokens_in = item.result.tokens_in
+            run.tokens_out = item.result.tokens_out
+            run.cost_usd = _calculate_cost(
+                item.result.tokens_in,
+                item.result.tokens_out,
+                provider.model_name,
+                execution_mode,
+                provider.provider_name,
+                item.result.cost_usd,
+            )
+            run.status = "done"
+            run.finished_at = datetime.now(timezone.utc)
+            _persist_results(session, asset, run, output)
+            stats["processed"] += 1
+        except ValidationError as exc:
+            run.status = "failed"
+            run.error_message = f"Schema validation failed: {exc.error_count()} error(s)"
+            run.finished_at = datetime.now(timezone.utc)
+            if raw_text:
+                run.raw_output = _failure_debug_payload(raw_text, str(exc), "schema")
+            _write_ai_debug_dump(asset, stage="schema_failed", raw_text=raw_text, error_message=str(exc))
+            stats["failed"] += 1
+            if len(failure_examples) < 3:
+                failure_examples.append(f"{asset.filename}: {run.error_message}")
+        except Exception as exc:
+            run.status = "failed"
+            run.error_message = _summarize_parse_error(str(exc), raw_text)
+            run.finished_at = datetime.now(timezone.utc)
+            if raw_text:
+                debug_stage = "truncated" if _looks_truncated_response(raw_text) else "parse"
+                run.raw_output = _failure_debug_payload(raw_text, str(exc), debug_stage)
+            _write_ai_debug_dump(asset, stage="parse_failed", raw_text=raw_text, error_message=str(exc))
+            stats["failed"] += 1
+            if len(failure_examples) < 3:
+                failure_examples.append(f"{asset.filename}: {run.error_message}")
+
+
 def extract_asset(
     asset: Asset,
     session: Session,
@@ -839,6 +970,7 @@ def extract_asset(
             provider.model_name,
             execution_mode,
             provider.provider_name,
+            result.cost_usd,
         )
         run.status = "done"
         run.finished_at = datetime.now(timezone.utc)
@@ -876,6 +1008,8 @@ def extract_all_pending(
     should_cancel: Callable[[], bool] | None = None,
     execution_mode: str = "standard",
     jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+    batch_chunk_size: int = 100,
+    batch_max_concurrent: int = 100,
 ) -> dict[str, int]:
     """Batch-extract assets that are new or have newer user context than their last successful extraction."""
     stats = {"processed": 0, "failed": 0, "skipped": 0, "cancelled": 0}
@@ -923,7 +1057,44 @@ def extract_all_pending(
             query = query.filter(
                 (Asset.canonical_path == folder_path) | (Asset.canonical_path.like(f"{folder_path}/%"))
             )
-        assets = query.limit(limit).all()
+        app_batch_mode = execution_mode == "batch" and _supports_app_batch(provider)
+        assets = query.all() if app_batch_mode else query.limit(limit).all()
+
+        if app_batch_mode:
+            for asset_chunk in _chunked(assets, batch_chunk_size):
+                if should_cancel and should_cancel():
+                    stats["cancelled"] = 1
+                    break
+                prepared_assets, requests = _prepare_app_batch_requests(
+                    session,
+                    asset_chunk,
+                    max_px=max_px,
+                    jpeg_quality=jpeg_quality,
+                    max_output_tokens=max_output_tokens,
+                    should_cancel=should_cancel,
+                    stats=stats,
+                    failure_examples=failure_examples,
+                )
+                if stats["cancelled"]:
+                    break
+                if not requests:
+                    continue
+                results = provider.generate_batch(requests, max_concurrent=batch_max_concurrent)
+                _persist_app_batch_results(
+                    session,
+                    provider,
+                    prepared_assets,
+                    results,
+                    execution_mode=execution_mode,
+                    stats=stats,
+                    failure_examples=failure_examples,
+                )
+                # Commit each completed chunk so OCR/text and other derived rows land immediately.
+                session.commit()
+
+            if failure_examples:
+                stats["failure_examples"] = failure_examples
+            return stats
 
         for asset in assets:
             if should_cancel and should_cancel():
@@ -1139,6 +1310,7 @@ def extract_all_pending_batch(
                     model_name,
                     "batch",
                     "gemini",
+                    result.cost_usd,
                 )
                 run.status = "done"
                 run.finished_at = datetime.now(timezone.utc)

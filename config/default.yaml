@@ -8,6 +8,10 @@ model:
   provider: "gemini"
   name: "gemini-3.1-flash-lite-preview"
 
+deepinfra:
+  base_url: "https://api.deepinfra.com/v1/openai"
+  default_model: "meta-llama/Llama-3.2-11B-Vision-Instruct"
+
 lmstudio:
   base_url: "http://127.0.0.1:1234/v1"
   default_model: "google/gemma-3-27b"
@@ -20,3 +24,5 @@ worker:
   concurrency: 2
   image_analysis_max_px: 1200
   ai_max_output_tokens: null
+  batch_chunk_size: 100
+  batch_max_concurrent: 100

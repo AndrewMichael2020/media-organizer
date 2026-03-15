@@ -288,9 +288,9 @@ Because of that, the app currently uses two practical image profiles:
 
 Use the hyper-optimized mode when you want lower cost and do **not** expect tiny text to be critical.
 
-### Official Gemini pricing used by this repo
+### Official provider pricing used by this repo
 
-As of 2026-03-15, the codebase prices Gemini extraction using the current public Google Gemini pricing page.
+As of 2026-03-15, the codebase prices extraction using the current public provider pricing pages.
 
 | Model / mode | Input per 1M tokens (USD) | Output per 1M tokens (USD) | Notes |
 |---|---:|---:|---|
@@ -300,6 +300,8 @@ As of 2026-03-15, the codebase prices Gemini extraction using the current public
 | Gemini 2.5 Flash + Batch | 0.075 | 0.625 | batch-discounted 2.5 Flash |
 | Gemini 2.5 Flash-Lite | 0.10 | 0.40 | current low-cost cloud default for cheap runs |
 | Gemini 2.5 Flash-Lite + Batch | 0.05 | 0.20 | cheapest hosted cloud option in the app |
+| DeepInfra Llama 3.2 11B Vision | 0.049 total | 0.049 total | DeepInfra currently publishes a single per-token rate rather than separate input/output pricing |
+| DeepInfra Llama 3.2 11B Vision (app batch) | 0.049 total | 0.049 total | app-side batching improves throughput, but does **not** create a provider-side token discount |
 | LM Studio local models | 0.00 | 0.00 | no API bill, but you pay local hardware / electricity instead |
 
 ### Real token history from this repo
@@ -332,15 +334,32 @@ These are not guesses from a blog post. They are computed from the token pattern
 | P50 observed run | 2,184 | 1,337 | 0.000753 |
 | P90 observed run | 2,243 | 2,266 | 0.001131 |
 
+#### DeepInfra Llama 3.2 11B Vision
+
+DeepInfra pricing is currently published as a single `$0.049 / 1M tokens` rate for this model, so the estimates below use `(input + output) * 0.049 / 1,000,000`.
+
+| Scenario from history | Input tokens | Output tokens | Cost / image (USD) |
+|---|---:|---:|---:|
+| Using Gemini 3.1 average token profile | 2,579 | 1,247 | 0.000187 |
+| Using Gemini 3.1 P50 token profile | 2,913 | 1,341 | 0.000208 |
+| Using Gemini 3.1 P90 token profile | 2,961 | 1,645 | 0.000226 |
+| Using Gemini 2.5 Flash-Lite average token profile | 2,214 | 1,802 | 0.000197 |
+| Using Gemini 2.5 Flash-Lite P50 token profile | 2,184 | 1,337 | 0.000173 |
+| Using Gemini 2.5 Flash-Lite P90 token profile | 2,243 | 2,266 | 0.000221 |
+
+These are **pricing estimates only**. DeepInfra may produce different token counts than Gemini for the same image and prompt, so you should expect some variance once you have real run history for that provider.
+
 ### Archive-scale cost scenarios
 
 These tables use the real average token usage already seen in this repo.
 
-| Images processed | Gemini 3.1 Flash-Lite Preview | Gemini 2.5 Flash-Lite | Gemini 2.5 Flash-Lite + Batch |
-|---|---:|---:|---:|
-| 1,000 | 2.52 USD | 0.94 USD | 0.47 USD |
-| 10,000 | 25.15 USD | 9.42 USD | 4.71 USD |
-| 100,000 | 251.52 USD | 94.19 USD | 47.10 USD |
+| Images processed | Gemini 3.1 Flash-Lite Preview | Gemini 2.5 Flash-Lite | Gemini 2.5 Flash-Lite + Batch | DeepInfra Llama 3.2 11B Vision |
+|---|---:|---:|---:|---:|
+| 1,000 | 2.52 USD | 0.94 USD | 0.47 USD | 0.20 USD |
+| 10,000 | 25.15 USD | 9.42 USD | 4.71 USD | 1.97 USD |
+| 100,000 | 251.52 USD | 94.19 USD | 47.10 USD | 19.68 USD |
+
+The DeepInfra column uses the observed Gemini 2.5 Flash-Lite average token profile (`2,214` input + `1,802` output) only as a proxy for comparison. Real DeepInfra runs may be somewhat higher or lower in total tokens.
 
 ### Practical recommendations
 
@@ -349,6 +368,8 @@ These tables use the real average token usage already seen in this repo.
 | Best current cloud detail | Gemini 3.1 Flash-Lite Preview | richer output, but most expensive |
 | Cheap broad processing | Gemini 2.5 Flash-Lite | much lower cost with acceptable quality |
 | Cheapest hosted cloud option in this app | Gemini 2.5 Flash-Lite + Batch | lowest token rates and lower-resolution image profile |
+| Lowest hosted token price in the current model selector | DeepInfra Llama 3.2 11B Vision | very low published token rate; quality and token behavior should be evaluated on your own archive |
+| Fast cheap cloud throughput without provider-side batch discounts | DeepInfra Llama 3.2 11B Vision (app batch) | app-side async concurrency and 100-image chunking improve throughput, but pricing is still the same per token |
 | No API bill | LM Studio local models | useful if local quality is acceptable and you already have the hardware |
 
 ### Compression and resize guidance
@@ -413,7 +434,16 @@ If you want to avoid per-image API costs entirely, you can explore self-hosting 
 - highly bursty use where the GPU would sit idle most of the time
 - when you still need strong OCR and robust multimodal extraction out of the box
 
-For this app today, Gemini 2.5 Flash-Lite + Batch is the simplest cheap hosted option. A self-hosted Phi-family path is interesting, but it is a second-stage engineering project, not just a model dropdown.
+For this app today:
+
+- `Gemini 2.5 Flash-Lite + Batch` is the simplest cheap hosted option with a real provider-side batch discount
+- `DeepInfra Llama 3.2 11B Vision` is currently the lowest published hosted token price in the selector, but you should benchmark extraction quality on your own archive before treating it as a full replacement
+- a self-hosted Phi-family path is interesting, but it is still a second-stage engineering project, not just a model dropdown
+
+### Pricing references used in this section
+
+- Google Gemini API pricing: `https://ai.google.dev/gemini-api/docs/pricing`
+- DeepInfra model pricing for `meta-llama/Llama-3.2-11B-Vision-Instruct`: `https://deepinfra.com/meta-llama/Llama-3.2-11B-Vision-Instruct`
 
 ## Debugging AI Extraction
 
