@@ -12,9 +12,9 @@ The originals stay where they already live on disk. The app layers metadata, thu
 - Runs AI extraction for OCR, summaries, tags, objects, place clues, and image notes
 - Provides a local web app with Gallery, Places, Review, Jobs, and Settings
 - Supports folder-scoped jobs so you can process one part of the archive at a time
-- Supports local model inferencing
+- Has local model inferencing options for image analysis to reduce AI costs and latency
 
-## What It Does Not Do
+## What It Does NOT Do
 
 - Runs on MacOS as a native app (but the web UI is designed for local use)
 - Syncs or manages files on disk (it catalogs and layers metadata only)
@@ -22,6 +22,10 @@ The originals stay where they already live on disk. The app layers metadata, thu
 - Supports multi-user access or cloud deployment (but the API could be adapted for that in the future)
 - Has CI/CD for cloud deployment (but the stack is containerized and could be adapted for that in the future)
 - Has ideal UI/UX (but it is designed to be practical and iteratively improved)
+- Has face detection (but it has people recognition and general object detection pipeline; face detection is next stage)
+- Has image series deep analysis
+- Map intelligence beyond basic reverse geocoding (but it extracts GPS and has a Places view for geo-tagged items)
+- Web search and image reverse web search integrations (but it has local search over metadata and AI-generated tags and summaries)
 
 ## Current Focus
 
