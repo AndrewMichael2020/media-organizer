@@ -115,6 +115,7 @@ async def start_ingest(req: StartJobRequest, background_tasks: BackgroundTasks) 
 @router.post("/{job_id}/stop", response_model=JobOut)
 async def stop_job(job_id: str) -> JobOut:
     from models import JobRun
+    from datetime import timezone
 
     with get_session() as session:
         job = session.get(JobRun, job_id)
@@ -123,7 +124,9 @@ async def stop_job(job_id: str) -> JobOut:
         if job.status not in ("queued", "running"):
             return _job_to_out(job)
         _CANCELLED_JOBS.add(job_id)
-        job.message = "Stop requested..."
+        job.status = "cancelled"
+        job.finished_at = datetime.now(timezone.utc)
+        job.message = "Stop requested."
         return _job_to_out(job)
 
 
@@ -252,6 +255,8 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
             detail = ""
             if stats.get("failure_examples"):
                 detail = " | " + " ; ".join(stats["failure_examples"])
+            if stats.get("mode_note"):
+                detail += (" | " if detail else " | ") + str(stats["mode_note"])
             _update(
                 "cancelled" if stats.get("cancelled") else "done",
                 f"Extracted {stats['processed']} assets ({stats['failed']} failed, {stats['skipped']} skipped){detail}"

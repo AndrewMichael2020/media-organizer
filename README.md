@@ -187,6 +187,23 @@ The Jobs page can run:
 
 The app also supports stopping a queued or running job. Stop is cooperative: it stops between items rather than killing the current file mid-processing.
 
+If the API server is interrupted or restarted while jobs are in progress, any `queued` or `running` jobs are marked `cancelled` on the next API startup so the UI does not keep showing stale running jobs forever.
+
+### Batch extraction timing
+
+`Gemini · gemini-2.5-flash-lite + Batch` is the lowest-cost cloud option in the app, but it is asynchronous.
+
+What to expect:
+
+- Small folder with a handful of images:
+  often finishes within a few seconds to a couple of minutes, but it is not guaranteed to feel immediate
+- Medium folder with dozens to a few hundred images:
+  often takes minutes, and may vary based on current Gemini batch queue load
+- Large archive batch:
+  may take much longer and is best treated as background work rather than interactive processing
+
+In this app, batch extraction currently waits for a reasonable short window. If Gemini batch does not finish in that window, the job falls back to direct `gemini-2.5-flash-lite` extraction with the same low-cost image profile instead of sitting in `running` forever.
+
 ## Configuration
 
 Defaults live in `config/default.yaml`.
@@ -203,7 +220,7 @@ database:
 
 model:
   provider: "gemini"
-  name: "gemini-2.0-flash-lite"
+  name: "gemini-3.1-flash-lite-preview"
 
 storage:
   source_roots: []
@@ -252,17 +269,151 @@ Main Apple image formats are supported.
 
 ## AI Cost Guidance
 
-For a large archive, cost control matters.
+This app can be run with several different AI cost profiles. The right choice depends on whether you care most about:
 
-Practical ways to keep cost down:
+- best detail and stronger OCR
+- lowest cloud cost
+- local inference with no per-image API bill
 
-- process by folder instead of the whole archive
-- run deterministic enrichment and thumbnails first
-- reserve AI extraction for folders you care about most
-- reduce `image_analysis_max_px` before adding complicated extra prompts
-- use a two-pass workflow later if you want a cheap broad pass and a richer selective pass
+### Important current caveat
 
-Very low budgets for fully detailed multimodal extraction across tens of thousands of images are usually unrealistic without a selective pipeline.
+OCR in the current pipeline is still largely model-side, not fully local. That means aggressive image downsizing can reduce cost, but it can also hurt tiny-text extraction.
+
+Because of that, the app currently uses two practical image profiles:
+
+- standard extraction:
+  around `1200px` longest side with normal JPEG compression
+- hyper-optimized extraction:
+  around `768px` longest side with stronger JPEG compression, used for the Flash-Lite batch option
+
+Use the hyper-optimized mode when you want lower cost and do **not** expect tiny text to be critical.
+
+### Official Gemini pricing used by this repo
+
+As of 2026-03-15, the codebase prices Gemini extraction using the current public Google Gemini pricing page.
+
+| Model / mode | Input per 1M tokens (USD) | Output per 1M tokens (USD) | Notes |
+|---|---:|---:|---|
+| Gemini 3.1 Flash-Lite Preview | 0.25 | 1.50 | richer but noticeably more expensive |
+| Gemini 3.1 Flash-Lite Preview + Batch | 0.125 | 0.75 | same model, Batch API discount |
+| Gemini 2.5 Flash | 0.15 | 1.25 | stronger than Lite, cheaper than 3.1 preview on output |
+| Gemini 2.5 Flash + Batch | 0.075 | 0.625 | batch-discounted 2.5 Flash |
+| Gemini 2.5 Flash-Lite | 0.10 | 0.40 | current low-cost cloud default for cheap runs |
+| Gemini 2.5 Flash-Lite + Batch | 0.05 | 0.20 | cheapest hosted cloud option in the app |
+| LM Studio local models | 0.00 | 0.00 | no API bill, but you pay local hardware / electricity instead |
+
+### Real token history from this repo
+
+The following comes from the current extraction history in the local DB at the time this README was updated.
+
+| Model seen in history | Successful runs | Avg input tokens / image | Avg output tokens / image | Avg cost / image (USD) |
+|---|---:|---:|---:|---:|
+| Gemini 3.1 Flash-Lite Preview | 31 | 2,579 | 1,247 | 0.002515 |
+| Gemini 2.5 Flash-Lite | 2 | 2,214 | 1,802 | 0.000942 |
+
+### Typical per-image cost scenarios from real runs
+
+These are not guesses from a blog post. They are computed from the token patterns already observed in this archive.
+
+#### Gemini 3.1 Flash-Lite Preview
+
+| Scenario from history | Input tokens | Output tokens | Cost / image (USD) |
+|---|---:|---:|---:|
+| Average observed run | 2,579 | 1,247 | 0.002515 |
+| P50 observed run | 2,913 | 1,341 | 0.002740 |
+| P90 observed run | 2,961 | 1,645 | 0.003208 |
+
+#### Gemini 2.5 Flash-Lite
+
+| Scenario from history | Input tokens | Output tokens | Cost / image (USD) |
+|---|---:|---:|---:|
+| Average observed run | 2,214 | 1,802 | 0.000942 |
+| Same token profile with Batch discount | 2,214 | 1,802 | 0.000471 |
+| P50 observed run | 2,184 | 1,337 | 0.000753 |
+| P90 observed run | 2,243 | 2,266 | 0.001131 |
+
+### Archive-scale cost scenarios
+
+These tables use the real average token usage already seen in this repo.
+
+| Images processed | Gemini 3.1 Flash-Lite Preview | Gemini 2.5 Flash-Lite | Gemini 2.5 Flash-Lite + Batch |
+|---|---:|---:|---:|
+| 1,000 | 2.52 USD | 0.94 USD | 0.47 USD |
+| 10,000 | 25.15 USD | 9.42 USD | 4.71 USD |
+| 100,000 | 251.52 USD | 94.19 USD | 47.10 USD |
+
+### Practical recommendations
+
+| Goal | Recommended mode | Why |
+|---|---|---|
+| Best current cloud detail | Gemini 3.1 Flash-Lite Preview | richer output, but most expensive |
+| Cheap broad processing | Gemini 2.5 Flash-Lite | much lower cost with acceptable quality |
+| Cheapest hosted cloud option in this app | Gemini 2.5 Flash-Lite + Batch | lowest token rates and lower-resolution image profile |
+| No API bill | LM Studio local models | useful if local quality is acceptable and you already have the hardware |
+
+### Compression and resize guidance
+
+The common advice to resize images to `768px` and use low-quality JPEGs is directionally correct, but in this app it must be used carefully.
+
+#### Good use cases
+
+- large archives where you mainly want scene summary, tags, and broad object clues
+- folders where OCR is unlikely to matter
+- inexpensive first-pass review
+
+#### Risky use cases
+
+- posters, signs, banners, bib numbers, storefronts, street signs
+- screenshots or document-like photos
+- historical images where tiny visible text matters
+
+#### Recommendation for this repo
+
+| Use case | Suggested setting |
+|---|---|
+| OCR-sensitive or detail-sensitive images | standard extraction profile |
+| broad archive surfacing with cost pressure | Flash-Lite + Batch |
+| future two-pass pipeline | cheap broad pass first, then rerun only selected assets in standard mode |
+
+### Batch timing guidance
+
+Batch is cheaper, but it is not instant.
+
+Reasonable expectations:
+
+| Batch size | What it often feels like |
+|---|---|
+| a handful of images | seconds to a couple of minutes |
+| dozens to a few hundred images | minutes, depending on Gemini queue load |
+| very large archive batches | background processing, not an interactive click-and-wait workflow |
+
+The app currently waits a short window for batch completion. If Gemini batch does not finish in that window, the job falls back to direct `gemini-2.5-flash-lite` extraction with the same low-cost image profile instead of sitting in `running` forever.
+
+### Theoretical exploration: Phi-family vision on GCP / Cloud Run
+
+If you want to avoid per-image API costs entirely, you can explore self-hosting a Phi-family multimodal model. One important note: the exact model name `Phi-4-Reasoning-Vision (15B)` was not something this repo currently verifies as an official, clearly documented deployment target, so treat this section as a **theoretical exploration path** for a Phi-family vision-capable model rather than a drop-in supported option today.
+
+#### Practical deployment shapes
+
+| Option | Feasibility | Cost pattern | Operational burden | Notes |
+|---|---|---|---|---|
+| Cloud Run + GPU | possible in principle for a compact quantized multimodal Phi-family model | low idle overhead if scaled to zero, but GPU time is still expensive | medium | attractive for bursty testing; throughput and cold starts matter |
+| GCE VM with GPU | straightforward if the model fits the chosen GPU | pay while VM is up | medium | easier to tune, easier to benchmark, better for long-running jobs |
+| GKE / managed serving | strongest for large sustained pipelines | highest ops complexity | high | more appropriate if you outgrow this local-first archive app |
+
+#### When a self-hosted Phi path makes sense
+
+- you want predictable monthly infrastructure spend instead of API metering
+- you have sustained enough volume to keep a GPU busy
+- you are comfortable with model serving, container builds, and GPU ops
+
+#### When it usually does **not** make sense
+
+- small or occasional folders
+- highly bursty use where the GPU would sit idle most of the time
+- when you still need strong OCR and robust multimodal extraction out of the box
+
+For this app today, Gemini 2.5 Flash-Lite + Batch is the simplest cheap hosted option. A self-hosted Phi-family path is interesting, but it is a second-stage engineering project, not just a model dropdown.
 
 ## Debugging AI Extraction
 

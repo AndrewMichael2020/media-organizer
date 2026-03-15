@@ -44,6 +44,16 @@ function displayExposure(value: unknown) {
   return text;
 }
 
+function summaryBlocks(text: string | null | undefined) {
+  if (!text) return [];
+  return text
+    .split(/(?=Archive place note:|Location context:|Archive note:|Operational context:)/g)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => !/^(Archive place note:|Location context:|Archive note:|Operational context:)\s*$/i.test(part))
+    .filter((value, index, all) => all.indexOf(value) === index);
+}
+
 function analyzeFacts(asset: AssetDetail) {
   const counts = new Map<string, number>();
   for (const object of asset.objects) {
@@ -134,6 +144,7 @@ export default function AssetDetailPage() {
     .filter(Boolean)
     .filter((value, index, all) => all.indexOf(value) === index)
     .join(" ");
+  const longSummaryBlocks = summaryBlocks(longSummary);
   const facts = analyzeFacts(asset);
   const displayPlace = asset.user_context?.place ?? asset.place_candidates[0]?.name ?? "—";
   const displayGps = asset.user_context?.gps_coords ?? (asset.location?.lat != null ? `${asset.location.lat.toFixed(5)}, ${asset.location.lon?.toFixed(5) ?? "—"}` : "—");
@@ -179,9 +190,11 @@ export default function AssetDetailPage() {
           <div className="space-y-2">
             <p className="text-[10px] uppercase tracking-[0.24em] text-[hsl(var(--muted))]">Photo details</p>
             <h2 className="font-display text-4xl leading-none">{asset.filename}</h2>
-            <p className="max-w-3xl text-[14px] leading-relaxed text-[hsl(var(--muted-foreground))]">
-              {longSummary || "No AI summary yet."}
-            </p>
+            <div className="max-w-3xl space-y-1.5 text-[14px] leading-relaxed text-[hsl(var(--muted-foreground))]">
+              {(longSummaryBlocks.length > 0 ? longSummaryBlocks : ["No AI summary yet."]).map((block, index) => (
+                <p key={`header-summary-${index}`}>{block}</p>
+              ))}
+            </div>
             {asset.extraction_run?.status === "failed" && asset.extraction_run.error_message && (
               <div className="max-w-3xl rounded-[1rem] border border-amber-300/40 bg-amber-300/12 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">
                 AI run failed: {asset.extraction_run.error_message}
@@ -226,9 +239,11 @@ export default function AssetDetailPage() {
             {asset.summary || asset.scene?.description || asset.tags.length > 0 || asset.objects.length > 0 ? (
               <Panel title="AI summary" icon={<Sparkles size={14} />}>
                 <div className="space-y-4">
-                  <p className="text-[13px] leading-relaxed text-[hsl(var(--foreground))]">
-                    {longSummary}
-                  </p>
+                  <div className="space-y-2 text-[13px] leading-relaxed text-[hsl(var(--foreground))]">
+                    {longSummaryBlocks.map((block, index) => (
+                      <p key={`summary-block-${index}`}>{block}</p>
+                    ))}
+                  </div>
                   {asset.tag_details.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {asset.tag_details.map((tag) => (
@@ -306,31 +321,6 @@ export default function AssetDetailPage() {
                   {facts.strongestObjects.map(([label, count]) => `${label} x${count}`).join(", ")}
                 </div>
               ) : null}
-            </Panel>
-
-            <Panel title="Taken together" icon={<Folder size={14} />}>
-              {asset.series ? (
-                <div className="space-y-3">
-                  <p className="text-[13px] text-[hsl(var(--foreground))]">{asset.series.label}</p>
-                  <div className="space-y-1.5">
-                    {asset.series.items.map((item) => (
-                      <Link
-                        key={item.id}
-                        href={`/asset/${item.id}`}
-                        className={cn(
-                          "flex items-center justify-between rounded-[1rem] px-3 py-2 text-[11px] transition-colors hover:bg-[hsl(var(--surface-raised))]",
-                          item.id === asset.id && "bg-[hsl(var(--surface-raised))]"
-                        )}
-                      >
-                        <span className="font-mono">{item.filename}</span>
-                        <span className="text-[hsl(var(--muted))]">{formatDate(item.captured_at)}</span>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[12px] text-[hsl(var(--muted-foreground))]">This photo does not appear to be part of a close time sequence in the same folder.</p>
-              )}
             </Panel>
 
             {(people.length > 0 || setting.confidence || operational.confidence || landscape.confidence) ? (
@@ -453,6 +443,31 @@ export default function AssetDetailPage() {
                 ) : null}
               </Panel>
             ) : null}
+
+            <Panel title="Taken together" icon={<Folder size={14} />} className="lg:col-span-2">
+              {asset.series ? (
+                <div className="space-y-3">
+                  <p className="text-[13px] text-[hsl(var(--foreground))]">{asset.series.label}</p>
+                  <div className="space-y-1.5">
+                    {asset.series.items.map((item) => (
+                      <Link
+                        key={item.id}
+                        href={`/asset/${item.id}`}
+                        className={cn(
+                          "flex items-center justify-between rounded-[1rem] px-3 py-2 text-[11px] transition-colors hover:bg-[hsl(var(--surface-raised))]",
+                          item.id === asset.id && "bg-[hsl(var(--surface-raised))]"
+                        )}
+                      >
+                        <span className="font-mono">{item.filename}</span>
+                        <span className="text-[hsl(var(--muted))]">{formatDate(item.captured_at)}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[12px] text-[hsl(var(--muted-foreground))]">This photo does not appear to be part of a close time sequence in the same folder.</p>
+              )}
+            </Panel>
           </div>
         </main>
 

@@ -47,18 +47,39 @@ logger = logging.getLogger(__name__)
 _PRICING_PER_M_TOKENS: dict[tuple[str, str], tuple[float, float]] = {
     ("gemini-2.5-flash-lite", "standard"): (0.10, 0.40),
     ("gemini-2.5-flash-lite", "batch"): (0.05, 0.20),
+    ("gemini-2.5-flash", "standard"): (0.15, 1.25),
+    ("gemini-2.5-flash", "batch"): (0.075, 0.625),
     ("gemini-3.1-flash-lite-preview", "standard"): (0.25, 1.50),
     ("gemini-3.1-flash-lite-preview", "batch"): (0.125, 0.75),
 }
 
 
-def _calculate_cost(tokens_in: int, tokens_out: int, model_name: str, execution_mode: str = "standard") -> float:
-    rates = _PRICING_PER_M_TOKENS.get((model_name, execution_mode))
+def _normalize_pricing_key(model_name: str, execution_mode: str) -> tuple[str, str]:
+    normalized_model = (model_name or "").strip()
+    normalized_mode = (execution_mode or "standard").strip().lower()
+    if normalized_model.endswith(" + batch"):
+        normalized_model = normalized_model[:-8].strip()
+        normalized_mode = "batch"
+    return normalized_model, normalized_mode
+
+
+def _calculate_cost(
+    tokens_in: int,
+    tokens_out: int,
+    model_name: str,
+    execution_mode: str = "standard",
+    provider_name: str = "gemini",
+) -> float:
+    if (provider_name or "").strip().lower() == "lmstudio":
+        return 0.0
+
+    pricing_model, pricing_mode = _normalize_pricing_key(model_name, execution_mode)
+    rates = _PRICING_PER_M_TOKENS.get((pricing_model, pricing_mode))
     if rates is None:
-        base = _PRICING_PER_M_TOKENS.get((model_name, "standard"))
+        base = _PRICING_PER_M_TOKENS.get((pricing_model, "standard"))
         if base is None:
             base = _PRICING_PER_M_TOKENS[("gemini-3.1-flash-lite-preview", "standard")]
-        rates = (base[0] * 0.5, base[1] * 0.5) if execution_mode == "batch" else base
+        rates = (base[0] * 0.5, base[1] * 0.5) if pricing_mode == "batch" else base
     return (tokens_in * rates[0] + tokens_out * rates[1]) / 1_000_000
 
 
@@ -812,7 +833,13 @@ def extract_asset(
         run.raw_output = output.model_dump()
         run.tokens_in = result.tokens_in
         run.tokens_out = result.tokens_out
-        run.cost_usd = _calculate_cost(result.tokens_in, result.tokens_out, provider.model_name, execution_mode)
+        run.cost_usd = _calculate_cost(
+            result.tokens_in,
+            result.tokens_out,
+            provider.model_name,
+            execution_mode,
+            provider.provider_name,
+        )
         run.status = "done"
         run.finished_at = datetime.now(timezone.utc)
 
@@ -847,6 +874,8 @@ def extract_all_pending(
     max_output_tokens: int | None = DEFAULT_MAX_OUTPUT_TOKENS,
     folder_path: str | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    execution_mode: str = "standard",
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
 ) -> dict[str, int]:
     """Batch-extract assets that are new or have newer user context than their last successful extraction."""
     stats = {"processed": 0, "failed": 0, "skipped": 0, "cancelled": 0}
@@ -911,8 +940,8 @@ def extract_all_pending(
                 provider,
                 max_px=max_px,
                 max_output_tokens=max_output_tokens,
-                execution_mode="standard",
-                jpeg_quality=DEFAULT_JPEG_QUALITY,
+                execution_mode=execution_mode,
+                jpeg_quality=jpeg_quality,
             )
             if run.status == "done":
                 stats["processed"] += 1
@@ -933,6 +962,7 @@ def extract_all_pending_batch(
     max_output_tokens: int | None = DEFAULT_MAX_OUTPUT_TOKENS,
     folder_path: str | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    max_wait_seconds: int = 20,
 ) -> dict[str, int]:
     """Submit a Gemini Batch API extraction job and persist finished responses."""
     stats = {"processed": 0, "failed": 0, "skipped": 0, "cancelled": 0}
@@ -1037,6 +1067,7 @@ def extract_all_pending_batch(
         if not batch_name:
             raise RuntimeError("Gemini Batch API did not return a batch job name")
 
+        waited_seconds = 0
         while True:
             if should_cancel and should_cancel():
                 provider.cancel_batch(batch_name)
@@ -1048,6 +1079,24 @@ def extract_all_pending_batch(
                 break
             import time
             time.sleep(5)
+            waited_seconds += 5
+            if waited_seconds >= max_wait_seconds:
+                fallback = extract_all_pending(
+                    "gemini",
+                    model_name,
+                    limit,
+                    max_px,
+                    max_output_tokens,
+                    folder_path,
+                    should_cancel,
+                    execution_mode="standard",
+                    jpeg_quality=HYPER_OPTIMIZED_JPEG_QUALITY,
+                )
+                fallback["mode_note"] = (
+                    f"Gemini batch did not finish within {max_wait_seconds}s; "
+                    "used direct Flash-Lite extraction with the low-cost image profile instead"
+                )
+                return fallback
 
         if stats["cancelled"]:
             if failure_examples:
@@ -1084,7 +1133,13 @@ def extract_all_pending_batch(
                 run.raw_output = output.model_dump()
                 run.tokens_in = result.tokens_in
                 run.tokens_out = result.tokens_out
-                run.cost_usd = _calculate_cost(result.tokens_in, result.tokens_out, model_name, "batch")
+                run.cost_usd = _calculate_cost(
+                    result.tokens_in,
+                    result.tokens_out,
+                    model_name,
+                    "batch",
+                    "gemini",
+                )
                 run.status = "done"
                 run.finished_at = datetime.now(timezone.utc)
                 _persist_results(session, asset, run, output)
