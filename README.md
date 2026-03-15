@@ -33,21 +33,28 @@ This project is optimized for local archive exploration, not cloud multi-user de
 - Database: PostgreSQL via Docker
 - AI provider: Gemini
 
+### Gallery view
 ![Gallery view](public/image.png)
 
+### Image card
 ![Image card](public/image-1.png)
 
+### Image analysis
 ![Image analysis](public/image-2.png)
 
+### Spacial analysis
 ![Spacial analysis](public/image-3.png)
 
+### Jobs (pick AI model local or remote)
 ![Jobs (pick local or remote AI model)](public/image-4.png)
+
+### Settings (enumerate folder, delete all artifact repos, etc.)
 
 ![Settings (enumerate folder, delete all artifact repos, etc.)](public/image-5.png)
 
 ## Requirements
 
-- macOS
+- macOS or Linux 
 - Docker Desktop
 - `uv`
 - Node.js 20+
