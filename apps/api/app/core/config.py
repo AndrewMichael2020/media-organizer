@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     # Model
     model_provider: str = "gemini"
     model_name: str = "gemini-3.1-flash-lite-preview"
+    lmstudio_base_url: str = "http://127.0.0.1:1234/v1"
+    lmstudio_default_model: str = "google/gemma-3-27b"
 
     # Storage
     source_roots: list[str] = []

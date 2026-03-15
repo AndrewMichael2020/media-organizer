@@ -15,4 +15,7 @@ def get_provider(provider: str = "gemini", model: str = "gemini-2.0-flash-lite")
     if p == "gemini":
         from gemini import GeminiProvider
         return GeminiProvider(model=model)
-    raise ValueError(f"Unknown model provider: {provider!r}. Supported: gemini")
+    if p == "lmstudio":
+        from lmstudio import LMStudioProvider
+        return LMStudioProvider(model=model)
+    raise ValueError(f"Unknown model provider: {provider!r}. Supported: gemini, lmstudio")

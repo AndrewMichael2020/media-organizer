@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Activity, RefreshCw, Cpu, Image, Layers, Coins, FolderOpen, Square, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api, type JobOut, type CostStats } from "@/lib/api";
+import { api, type JobOut, type CostStats, type ConfigSnapshot } from "@/lib/api";
 
 type JobStatus = "running" | "queued" | "done" | "failed" | "cancelled";
 
@@ -34,18 +34,33 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState<string | null>(null);
   const [costStats, setCostStats] = useState<CostStats | null>(null);
+  const [cfg, setCfg] = useState<ConfigSnapshot | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scopePath, setScopePath] = useState("");
   const [busyReset, setBusyReset] = useState(false);
+  const [selectedModelKey, setSelectedModelKey] = useState("gemini-default");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const jobsRef = useRef<JobOut[]>([]);
 
   const load = useCallback(() => {
     api.jobs.list()
       .then(setJobs)
-      .catch(() => {})
+      .catch((err: Error) => {
+        setErrorMessage(err.message.includes("Failed to fetch")
+          ? "The API is not reachable right now. Check that the API server and PostgreSQL are both running."
+          : err.message)
+      })
       .finally(() => setLoading(false));
     api.jobs.costStats()
       .then(setCostStats)
+      .catch(() => {});
+    api.config.get()
+      .then((snapshot) => {
+        setCfg(snapshot);
+        setSelectedModelKey((current) =>
+          current || snapshot.model_profiles[0]?.key || "gemini-default"
+        );
+      })
       .catch(() => {});
   }, []);
 
@@ -74,9 +89,21 @@ export default function JobsPage() {
 
   async function startJob(type: string) {
     setStarting(type);
+    setErrorMessage(null);
     try {
-      await api.jobs.startIngest({ type, source_root: scopePath.trim() || undefined });
+      const selectedModel = cfg?.model_profiles.find((item) => item.key === selectedModelKey);
+      await api.jobs.startIngest({
+        type,
+        source_root: scopePath.trim() || undefined,
+        model_provider: type === "extract" ? selectedModel?.provider : undefined,
+        model_name: type === "extract" ? selectedModel?.model_name : undefined,
+      });
       load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start job";
+      setErrorMessage(message.includes("Failed to fetch")
+        ? "Could not reach the API while starting the job. Check that the API server is running and that PostgreSQL is available on localhost:5432."
+        : message);
     } finally {
       setStarting(null);
     }
@@ -149,7 +176,33 @@ export default function JobsPage() {
             <RotateCcw size={11} />
             Reset metadata
           </button>
+          <select
+            value={selectedModelKey}
+            onChange={(e) => setSelectedModelKey(e.target.value)}
+            className="min-w-[280px] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-raised))] px-3 py-2 text-[12px]"
+            title="Model used for AI extraction jobs"
+          >
+            {(cfg?.model_profiles ?? []).map((profile) => (
+              <option key={profile.key} value={profile.key}>
+                {profile.label}
+              </option>
+            ))}
+          </select>
         </div>
+        {cfg ? (
+          <p className="mb-3 text-[11px] text-[hsl(var(--muted-foreground))]">
+            AI extraction will use{" "}
+            <span className="font-medium text-[hsl(var(--foreground))]">
+              {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.label ?? "the selected model"}
+            </span>
+            {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.provider === "lmstudio" ? ` via ${cfg.lmstudio_base_url}` : ""}.
+          </p>
+        ) : null}
+        {errorMessage ? (
+          <div className="mb-3 rounded-md border border-red-300/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-600">
+            {errorMessage}
+          </div>
+        ) : null}
         <div className="flex gap-2 flex-wrap">
           {JOB_ACTIONS.map(({ type, label, icon: Icon, description }) => (
             <button

@@ -23,6 +23,12 @@ This project is optimized for local archive exploration, not cloud multi-user de
 - Database: PostgreSQL via Docker
 - AI provider: Gemini
 
+![Gallery view](public/image.png)
+
+![Image card](public/image-1.png)
+
+![Image analysis](public/image-2.png)
+
 ## Requirements
 
 - macOS

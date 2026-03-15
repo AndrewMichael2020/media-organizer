@@ -802,7 +802,7 @@ def extract_all_pending(
     folder_path: str | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, int]:
-    """Batch-extract all assets that haven't been extracted yet."""
+    """Batch-extract assets that are new or have newer user context than their last successful extraction."""
     stats = {"processed": 0, "failed": 0, "skipped": 0, "cancelled": 0}
     failure_examples: list[str] = []
 
@@ -810,20 +810,38 @@ def extract_all_pending(
     prompt = _load_prompt()  # validate prompt loads before touching DB
 
     with get_session() as session:
-        # Find assets with no successful extraction run
-        from sqlalchemy import select
+        from sqlalchemy import and_, func, or_, select
 
-        done_subq = (
-            select(ExtractionRun.asset_id)
+        latest_done_subq = (
+            select(
+                ExtractionRun.asset_id.label("asset_id"),
+                func.max(func.coalesce(ExtractionRun.finished_at, ExtractionRun.started_at)).label("latest_done_at"),
+            )
             .where(ExtractionRun.status == "done")
-            .scalar_subquery()
+            .group_by(ExtractionRun.asset_id)
+            .subquery()
         )
+
+        stale_done_asset_ids = (
+            select(Assertion.asset_id)
+            .join(latest_done_subq, latest_done_subq.c.asset_id == Assertion.asset_id)
+            .where(
+                Assertion.is_active == True,  # noqa: E712
+                Assertion.predicate.in_(["user.place", "user.gps_coords", "user.comments"]),
+                Assertion.created_at > latest_done_subq.c.latest_done_at,
+            )
+            .distinct()
+        )
+
         query = (
             session.query(Asset)
             .filter(
                 Asset.is_missing == False,  # noqa: E712
                 Asset.media_type == "photo",
-                ~Asset.id.in_(done_subq),
+                or_(
+                    ~Asset.id.in_(select(latest_done_subq.c.asset_id)),
+                    Asset.id.in_(stale_done_asset_ids),
+                ),
             )
         )
         if folder_path:

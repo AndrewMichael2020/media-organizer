@@ -161,6 +161,14 @@ export interface ConfigSnapshot {
   derivative_cache_root: string;
   model_provider: string;
   model_name: string;
+  lmstudio_base_url: string;
+  model_profiles: {
+    key: string;
+    label: string;
+    provider: string;
+    model_name: string;
+    kind: string;
+  }[];
   api_version: string;
 }
 
@@ -285,7 +293,7 @@ export const api = {
   jobs: {
     list: () => apiFetch<JobOut[]>("/jobs"),
     get: (id: string) => apiFetch<JobOut>(`/jobs/${id}`),
-    startIngest: (body: { type: string; source_root?: string; asset_ids?: string[] }) =>
+    startIngest: (body: { type: string; source_root?: string; asset_ids?: string[]; model_provider?: string; model_name?: string }) =>
       apiFetch<JobOut>("/jobs/ingest", { method: "POST", body: JSON.stringify(body) }),
     stop: (id: string) => apiFetch<JobOut>(`/jobs/${id}/stop`, { method: "POST" }),
     costStats: () => apiFetch<CostStats>("/jobs/extraction/cost-stats"),

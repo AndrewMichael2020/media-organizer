@@ -380,6 +380,55 @@ def _clean_summary_text(text: str) -> str:
     return cleaned
 
 
+def _contextualize_summary(
+    summary: str | None,
+    user_context: UserContextInfo | None,
+    location_meta: LocationMetaInfo | None,
+    analysis: dict | None,
+) -> str | None:
+    parts: list[str] = []
+    if summary:
+        parts.append(_clean_summary_text(summary))
+
+    context_bits: list[str] = []
+    if user_context and user_context.place:
+        context_bits.append(f"Archive place note: {user_context.place}.")
+
+    if location_meta:
+        loc_parts = [
+            location_meta.place_name_candidate,
+            location_meta.nearest_city_candidate,
+            location_meta.province_or_state_candidate,
+            location_meta.country_candidate,
+        ]
+        loc_text = ", ".join(part for part in loc_parts if part)
+        if loc_text:
+            context_bits.append(f"Location context: {loc_text}.")
+
+    if user_context and user_context.comments:
+        context_bits.append(f"Archive note: {user_context.comments}")
+
+    if analysis and isinstance(analysis, dict):
+        operational = analysis.get("operational_context") if isinstance(analysis.get("operational_context"), dict) else {}
+        functions = operational.get("scene_function_hypotheses") if isinstance(operational, dict) else []
+        if isinstance(functions, list) and functions:
+            labels: list[str] = []
+            for item in functions[:2]:
+                if isinstance(item, dict) and item.get("label"):
+                    labels.append(str(item["label"]).replace("_", " "))
+            if labels:
+                context_bits.append(f"Operational context: {', '.join(dict.fromkeys(labels))}.")
+
+    for bit in context_bits:
+        cleaned = _clean_summary_text(bit)
+        if cleaned and cleaned not in parts:
+            parts.append(cleaned)
+
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
 def _dedupe_text_items(value: str) -> str:
     items = [item.strip(" .") for item in value.split(",")]
     output: list[str] = []
@@ -487,7 +536,7 @@ def _location_meta(asset, run, ocr_text: str | None, places: list[PlaceInfo]) ->
     location_precision = str(model_location_meta.get("location_precision") or "unknown")
     location_confidence = str(model_location_meta.get("location_confidence") or "low")
 
-    if asset.location and asset.location.lat is not None and asset.location.lon is not None:
+    if asset.location and asset.location.latitude is not None and asset.location.longitude is not None:
         evidence.append("embedded coordinates available")
         if location_source == "unknown":
             location_source = "embedded_metadata"
@@ -834,13 +883,14 @@ async def get_asset_detail(asset_id: str) -> AssetDetail:
         if asset.media_info:
             m = asset.media_info
             exif = m.exiftool_raw or {}
+            lens_model = exif.get("LensModel") or exif.get("Lens")
             mi = MediaInfo(
                 width=m.width, height=m.height,
                 duration_seconds=m.duration_seconds,
                 codec=m.video_codec,
                 camera_make=m.make,
                 camera_model=m.model,
-                lens_model=exif.get("LensModel") or exif.get("Lens"),
+                lens_model=str(lens_model) if lens_model is not None else None,
                 aperture=exif.get("Aperture") or exif.get("FNumber"),
                 shutter_speed=str(exif.get("ShutterSpeed") or exif.get("ExposureTime") or ""),
                 iso=exif.get("ISO"),
@@ -991,6 +1041,8 @@ async def get_asset_detail(asset_id: str) -> AssetDetail:
             if len(group) > 1:
                 group = sorted(group, key=lambda item: item.captured_at or "")
                 series = SeriesInfo(label=f"{len(group)} photos taken close together", count=len(group), items=group)
+
+        summary = _contextualize_summary(summary, user_context, location_meta, analysis)
 
         return AssetDetail(
             id=asset.id,

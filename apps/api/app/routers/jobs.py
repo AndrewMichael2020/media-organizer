@@ -46,6 +46,8 @@ class StartJobRequest(BaseModel):
     type: JobType
     source_root: str | None = None
     asset_ids: list[str] | None = None
+    model_provider: str | None = None
+    model_name: str | None = None
 
 
 def _job_to_out(job) -> JobOut:
@@ -89,11 +91,14 @@ async def start_ingest(req: StartJobRequest, background_tasks: BackgroundTasks) 
     from models import JobRun
 
     with get_session() as session:
+        queued_message = f"Queued {req.type.value}"
+        if req.type == JobType.extract and req.model_provider and req.model_name:
+            queued_message = f"Queued {req.type.value} with {req.model_provider}/{req.model_name}"
         job = JobRun(
             job_type=req.type.value,
             status="queued",
             source_root=req.source_root,
-            message=f"Queued {req.type.value}",
+            message=queued_message,
         )
         session.add(job)
         session.flush()
@@ -199,7 +204,10 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
         result = await asyncio.to_thread(scan_source_root, scope)
         _update("running", f"Scan done — {result.new} new, {result.updated} updated, {result.found} found. Continuing…")
 
-    _update("running", f"Starting {req.type.value}…")
+    running_message = f"Starting {req.type.value}…"
+    if req.type == JobType.extract and req.model_provider and req.model_name:
+        running_message = f"Starting {req.type.value} with {req.model_provider}/{req.model_name}…"
+    _update("running", running_message)
     try:
         scoped = str(Path(req.source_root).expanduser().resolve()) if req.source_root else None
         if req.type == JobType.scan:
@@ -219,8 +227,8 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
             await _ensure_assets_for_scope(scoped)
             stats = await asyncio.to_thread(
                 extract_all_pending,
-                settings.model_provider,
-                settings.model_name,
+                req.model_provider or settings.model_provider,
+                req.model_name or settings.model_name,
                 50,
                 settings.worker_image_analysis_max_px,
                 settings.worker_ai_max_output_tokens,

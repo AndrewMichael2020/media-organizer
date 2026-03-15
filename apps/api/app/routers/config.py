@@ -35,7 +35,17 @@ class ConfigSnapshot(BaseModel):
     derivative_cache_root: str
     model_provider: str
     model_name: str
+    lmstudio_base_url: str
+    model_profiles: list["ModelProfile"]
     api_version: str = "0.1.0"
+
+
+class ModelProfile(BaseModel):
+    key: str
+    label: str
+    provider: str
+    model_name: str
+    kind: str
 
 
 class PurgeMetadataRequest(BaseModel):
@@ -73,6 +83,30 @@ async def get_config() -> ConfigSnapshot:
         derivative_cache_root=settings.derivative_cache_root,
         model_provider=settings.model_provider,
         model_name=settings.model_name,
+        lmstudio_base_url=settings.lmstudio_base_url,
+        model_profiles=[
+            ModelProfile(
+                key="gemini-default",
+                label=f"Gemini · {settings.model_name}",
+                provider=settings.model_provider,
+                model_name=settings.model_name,
+                kind="cloud",
+            ),
+            ModelProfile(
+                key="lmstudio-gemma-27b",
+                label=f"LM Studio · {settings.lmstudio_default_model}",
+                provider="lmstudio",
+                model_name=settings.lmstudio_default_model,
+                kind="local",
+            ),
+            ModelProfile(
+                key="lmstudio-gemma-3n-e4b",
+                label="LM Studio · google/gemma-3n-e4b",
+                provider="lmstudio",
+                model_name="google/gemma-3n-e4b",
+                kind="local",
+            ),
+        ],
     )
 
 
