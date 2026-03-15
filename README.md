@@ -1,11 +1,10 @@
 # Media Archive Tool
 
-<!-- OSINT / Forensic Intent -->
-[![OSINT-Style Analysis](https://img.shields.io/badge/OSINT--Style-Image%20Analysis-8B0000?style=flat-square&logo=target&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
-[![Forensic Metadata](https://img.shields.io/badge/Forensic-Metadata%20Extraction-2F4F4F?style=flat-square&logo=files&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+<!-- Intent -->
+[![Metadata Focus](https://img.shields.io/badge/Forensic-Metadata%20Extraction-2F4F4F?style=flat-square&logo=files&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
 [![AI-Powered](https://img.shields.io/badge/AI--Powered-Multimodal%20Extraction-7B2FBE?style=flat-square&logo=google&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
 [![Local-First](https://img.shields.io/badge/Local--First-No%20Cloud%20Required-228B22?style=flat-square&logo=homeassistant&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
-[![Originals Untouched](https://img.shields.io/badge/Originals-Never%20Moved%20or%20Copied-FF8C00?style=flat-square&logo=lock&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
+[![Original Images Untouched](https://img.shields.io/badge/Originals-Never%20Moved%20or%20Copied-FF8C00?style=flat-square&logo=lock&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
 
 <!-- Backend Stack -->
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3120/)
@@ -31,9 +30,7 @@
 <!-- Engineering Practices -->
 [![Typed Schemas](https://img.shields.io/badge/Typed-Pydantic%20Schemas-E92063?style=flat-square&logo=checkmarx&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
 [![Idempotent Pipelines](https://img.shields.io/badge/Pipelines-Idempotent%20%26%20Restartable-F59E0B?style=flat-square&logo=apacheairflow&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
-[![Evidence Trail](https://img.shields.io/badge/Evidence-Full%20Extraction%20Trail-8B4513?style=flat-square&logo=microscope&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
-[![Reprocessing](https://img.shields.io/badge/Reprocessing-First--Class%20Feature-1E90FF?style=flat-square&logo=refresh&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
-[![macOS](https://img.shields.io/badge/Primary%20Target-macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://www.apple.com/macos/)
+[![Grounded in Evidence](https://img.shields.io/badge/Evidence-Full%20Extraction%20Trail-8B4513?style=flat-square&logo=microscope&logoColor=white)](https://github.com/AndrewMichael2020/media-organizer)
 
 ---
 
