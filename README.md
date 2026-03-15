@@ -71,7 +71,10 @@ This project is optimized for local archive exploration, not cloud multi-user de
 - AI provider: Gemini
 
 ### Gallery view
-![Gallery view](public/image.png)
+![Gallery view](public/image-0.png)
+
+### Another Gallery view with filters open
+![Gallery View](public/image-6.png)
 
 ### Image card
 ![Image card](public/image-1.png)
