@@ -29,6 +29,12 @@ This project is optimized for local archive exploration, not cloud multi-user de
 
 ![Image analysis](public/image-2.png)
 
+![Spacial analysis](public/image-3.png)
+
+![Jobs](public/image-4.png)
+
+![Settings (enumerate folder, delete all artifact repos, etc.)](public/image-5.png)
+
 ## Requirements
 
 - macOS
