@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, Eye, Folder, MapPin, ScanSearch, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeft, Eye, Folder, MapPin, Pencil, Save, ScanSearch, Sparkles, X } from "lucide-react";
 import { api, type AssetDetail } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +32,18 @@ function confidenceLabel(value: number | null | undefined) {
   return "low";
 }
 
+function displayValue(value: unknown) {
+  if (value == null || value === "") return "unknown";
+  return String(value).replace(/_/g, " ");
+}
+
+function displayExposure(value: unknown) {
+  const text = displayValue(value);
+  if (text === "high") return "exposed";
+  if (text === "extreme") return "highly exposed";
+  return text;
+}
+
 function analyzeFacts(asset: AssetDetail) {
   const counts = new Map<string, number>();
   for (const object of asset.objects) {
@@ -49,8 +61,22 @@ function analyzeFacts(asset: AssetDetail) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4);
   const ocrLines = asset.ocr_text ? asset.ocr_text.split(/\n+/).filter(Boolean).length : 0;
+  const analysis = (asset.analysis ?? {}) as Record<string, unknown>;
+  const peopleOverview = (analysis.people_overview ?? {}) as Record<string, unknown>;
+  const objectsRaw = Array.isArray(analysis.objects) ? analysis.objects : [];
+  const highSignificanceObjects = objectsRaw.filter(
+    (item) => item && typeof item === "object" && (item as Record<string, unknown>).significance === "high"
+  ).length;
 
-  return { personCount, animals, strongestObjects, ocrLines };
+  return {
+    personCount: typeof peopleOverview.people_count_visible === "number" ? Number(peopleOverview.people_count_visible) : personCount,
+    animals,
+    strongestObjects,
+    ocrLines,
+    highSignificanceObjects,
+    peopleOverview,
+    analysis,
+  };
 }
 
 export default function AssetDetailPage() {
@@ -59,6 +85,10 @@ export default function AssetDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [editingCapture, setEditingCapture] = useState(false);
+  const [savingCapture, setSavingCapture] = useState(false);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const [captureForm, setCaptureForm] = useState({ place: "", gps_coords: "", comments: "" });
 
   useEffect(() => {
     if (!id) return;
@@ -67,6 +97,15 @@ export default function AssetDetailPage() {
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!asset) return;
+    setCaptureForm({
+      place: asset.user_context?.place ?? asset.place_candidates[0]?.name ?? "",
+      gps_coords: asset.user_context?.gps_coords ?? (asset.location?.lat != null ? `${asset.location.lat.toFixed(5)}, ${asset.location.lon?.toFixed(5) ?? ""}` : ""),
+      comments: asset.user_context?.comments ?? "",
+    });
+  }, [asset]);
 
   if (loading) {
     return <div className="flex h-full items-center justify-center text-[12px] text-[hsl(var(--muted))]">Loading photo details...</div>;
@@ -96,6 +135,38 @@ export default function AssetDetailPage() {
     .filter((value, index, all) => all.indexOf(value) === index)
     .join(" ");
   const facts = analyzeFacts(asset);
+  const displayPlace = asset.user_context?.place ?? asset.place_candidates[0]?.name ?? "—";
+  const displayGps = asset.user_context?.gps_coords ?? (asset.location?.lat != null ? `${asset.location.lat.toFixed(5)}, ${asset.location.lon?.toFixed(5) ?? "—"}` : "—");
+  const displayComments = asset.user_context?.comments ?? "—";
+  const people = Array.isArray((facts.analysis as Record<string, unknown>).people)
+    ? ((facts.analysis as Record<string, unknown>).people as Array<Record<string, unknown>>)
+    : [];
+  const setting = ((facts.analysis as Record<string, unknown>).setting_analysis ?? {}) as Record<string, unknown>;
+  const operational = ((facts.analysis as Record<string, unknown>).operational_context ?? {}) as Record<string, unknown>;
+  const landscape = ((facts.analysis as Record<string, unknown>).landscape_analysis ?? {}) as Record<string, unknown>;
+  const sensitivity = ((facts.analysis as Record<string, unknown>).sensitivity_review ?? {}) as Record<string, unknown>;
+  const analysisObjects = Array.isArray((facts.analysis as Record<string, unknown>).objects)
+    ? ((facts.analysis as Record<string, unknown>).objects as Array<Record<string, unknown>>)
+    : [];
+
+  async function saveCaptureInfo() {
+    if (!asset) return;
+    setSavingCapture(true);
+    setCaptureError(null);
+    try {
+      const userContext = await api.assets.updateUserContext(asset.id, {
+        place: captureForm.place.trim() || null,
+        gps_coords: captureForm.gps_coords.trim() || null,
+        comments: captureForm.comments.trim() || null,
+      });
+      setAsset((prev) => prev ? { ...prev, user_context: userContext } : prev);
+      setEditingCapture(false);
+    } catch (err) {
+      setCaptureError(err instanceof Error ? err.message : "Failed to save capture info");
+    } finally {
+      setSavingCapture(false);
+    }
+  }
 
   return (
     <div className="h-full overflow-auto px-5 pb-8 pt-5">
@@ -220,6 +291,8 @@ export default function AssetDetailPage() {
                 <FactBox label="Tag count" value={String(asset.tag_details.length || asset.tags.length)} />
                 <FactBox label="Text lines" value={String(facts.ocrLines)} />
                 <FactBox label="Place candidates" value={String(asset.place_candidates.length)} />
+                <FactBox label="High-signal objects" value={String(facts.highSignificanceObjects)} />
+                <FactBox label="Dominant activity" value={String(facts.peopleOverview.dominant_activity ?? "unknown")} />
               </div>
               {facts.animals.length > 0 ? (
                 <div className="mt-3 text-[12px] text-[hsl(var(--muted-foreground))]">
@@ -259,6 +332,127 @@ export default function AssetDetailPage() {
                 <p className="text-[12px] text-[hsl(var(--muted-foreground))]">This photo does not appear to be part of a close time sequence in the same folder.</p>
               )}
             </Panel>
+
+            {(people.length > 0 || setting.confidence || operational.confidence || landscape.confidence) ? (
+              <Panel title="Operational reading" icon={<Sparkles size={14} />} className="lg:col-span-2">
+                <div className="space-y-4 text-[12px] leading-relaxed text-[hsl(var(--muted-foreground))]">
+                  {people.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">People</p>
+                      {people.slice(0, 6).map((person, index) => {
+                        const roles = Array.isArray(person.role_hypotheses) ? (person.role_hypotheses as Array<Record<string, unknown>>) : [];
+                        const topRole = roles[0];
+                        const clothing = Array.isArray(person.clothing_items) ? person.clothing_items.join(", ") : "";
+                        const gear = Array.isArray(person.carried_or_worn_gear) ? person.carried_or_worn_gear.join(", ") : "";
+                        return (
+                          <div key={`person-${index}`} className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                            <p className="text-[hsl(var(--foreground))]">
+                              Person {index + 1}: {String(topRole?.label ?? "unknown")}
+                              {topRole?.confidence ? <span className="text-[hsl(var(--muted))]">{` · ${String(topRole.confidence)}`}</span> : null}
+                            </p>
+                            {clothing ? <p>Clothing: {clothing}</p> : null}
+                            {gear ? <p>Gear: {gear}</p> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                      <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Setting</p>
+                      <p>Public/private: {displayValue(setting.public_private)}</p>
+                      <p>Use: {displayValue(setting.institutional_commercial_leisure)}</p>
+                      <p>Economic signal: {displayValue(setting.built_environment_economic_signal)}</p>
+                      {Array.isArray(setting.organization_text_cues) && setting.organization_text_cues.length > 0 ? <p>Text cues: {setting.organization_text_cues.join(", ")}</p> : null}
+                      {Array.isArray(setting.visible_logos) && setting.visible_logos.length > 0 ? <p>Logos: {setting.visible_logos.join(", ")}</p> : null}
+                    </div>
+                    <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                      <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Operational</p>
+                      <p>Security presence: {displayValue(operational.security_presence)}</p>
+                      <p>Mobility: {displayValue(operational.mobility_context)}</p>
+                      <p>Infrastructure: {displayValue(operational.infrastructure_status)}</p>
+                      {Array.isArray(operational.scene_function_hypotheses) && operational.scene_function_hypotheses.length > 0 ? (
+                        <p>Scene function: {operational.scene_function_hypotheses.map((item) => String((item as Record<string, unknown>).label ?? "unknown").replace(/_/g, " ")).join(", ")}</p>
+                      ) : null}
+                      {Array.isArray(operational.damage_indicators) && operational.damage_indicators.length > 0 ? <p>Damage: {operational.damage_indicators.join(", ")}</p> : null}
+                      {Array.isArray(operational.threat_indicators) && operational.threat_indicators.length > 0 ? <p>Threat cues: {operational.threat_indicators.join(", ")}</p> : null}
+                    </div>
+                    <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                      <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Landscape</p>
+                      <p>Terrain: {displayValue(landscape.terrain_type)}</p>
+                      <p>Slope: {displayValue(landscape.slope_character)}</p>
+                      <p>Exposure: {displayExposure(landscape.exposure_level)}</p>
+                      <p>Visibility: {displayValue(landscape.weather_visibility_cues)}</p>
+                    </div>
+                    <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                      <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Sensitivity</p>
+                      <p>Severity: {displayValue(sensitivity.severity ?? "low")}</p>
+                      {Array.isArray(sensitivity.flags) && sensitivity.flags.length > 0 ? <p>Flags: {sensitivity.flags.join(", ")}</p> : null}
+                      {Array.isArray(sensitivity.reasons) && sensitivity.reasons.length > 0 ? <p>Reasons: {sensitivity.reasons.join(", ")}</p> : null}
+                    </div>
+                  </div>
+                  {analysisObjects.length > 0 ? (
+                    <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                      <p className="mb-2 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">High-signal objects</p>
+                      <div className="space-y-2">
+                        {analysisObjects.slice(0, 8).map((item, index) => {
+                          const object = item as Record<string, unknown>;
+                          const evidence = Array.isArray(object.evidence) ? object.evidence.map((entry) => String(entry)) : [];
+                          return (
+                            <div key={`analysis-object-${index}`} className="text-[12px] text-[hsl(var(--foreground))]">
+                              <p>
+                                {displayValue(object.object_label)}
+                                {object.count_estimate ? ` x${String(object.count_estimate)}` : ""}
+                                {object.significance ? <span className="text-[hsl(var(--muted))]">{` · ${displayValue(object.significance)}`}</span> : null}
+                              </p>
+                              {evidence.length > 0 ? <p className="text-[hsl(var(--muted-foreground))]">{evidence.join(", ")}</p> : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </Panel>
+            ) : null}
+
+            {asset.location_meta ? (
+              <Panel title="Location meta" icon={<MapPin size={14} />} className="lg:col-span-2">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                    <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Candidate place</p>
+                    <p className="break-words text-[hsl(var(--foreground))]">{asset.location_meta.place_name_candidate ?? "—"}</p>
+                  </div>
+                  <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                    <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Nearest city</p>
+                    <p className="break-words text-[hsl(var(--foreground))]">{asset.location_meta.nearest_city_candidate ?? "—"}</p>
+                  </div>
+                  <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                    <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Province or state</p>
+                    <p className="break-words text-[hsl(var(--foreground))]">{asset.location_meta.province_or_state_candidate ?? "—"}</p>
+                  </div>
+                  <div className="rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                    <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Country</p>
+                    <p className="break-words text-[hsl(var(--foreground))]">{asset.location_meta.country_candidate ?? "—"}</p>
+                  </div>
+                </div>
+                <div className="mt-3 rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                  <p className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Confidence</p>
+                  <p className="break-words text-[hsl(var(--foreground))]">{displayValue(asset.location_meta.location_confidence)}</p>
+                </div>
+                {asset.location_meta.location_evidence.length > 0 ? (
+                  <div className="mt-3 rounded-[1rem] bg-[hsl(var(--surface-raised))] px-3 py-2">
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.16em] text-[hsl(var(--muted))]">Evidence</p>
+                    <div className="space-y-1 text-[12px] leading-relaxed text-[hsl(var(--foreground))]">
+                      {asset.location_meta.location_evidence.map((item, index) => (
+                        <p key={`location-evidence-${index}`} className="break-words">{item}</p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </Panel>
+            ) : null}
           </div>
         </main>
 
@@ -273,16 +467,88 @@ export default function AssetDetailPage() {
             )}
           </Panel>
 
-          <Panel title="Capture info" icon={<MapPin size={14} />}>
+          <Panel
+            title="Capture info"
+            icon={<MapPin size={14} />}
+            actions={editingCapture ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingCapture(false);
+                    setCaptureError(null);
+                    setCaptureForm({
+                      place: asset.user_context?.place ?? asset.place_candidates[0]?.name ?? "",
+                      gps_coords: asset.user_context?.gps_coords ?? (asset.location?.lat != null ? `${asset.location.lat.toFixed(5)}, ${asset.location.lon?.toFixed(5) ?? ""}` : ""),
+                      comments: asset.user_context?.comments ?? "",
+                    });
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-[hsl(var(--border))] px-3 py-1 text-[10px] uppercase tracking-[0.16em]"
+                >
+                  <X size={12} />
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveCaptureInfo}
+                  disabled={savingCapture}
+                  className="inline-flex items-center gap-1 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--surface-raised))] px-3 py-1 text-[10px] uppercase tracking-[0.16em] disabled:opacity-60"
+                >
+                  <Save size={12} />
+                  {savingCapture ? "Saving" : "Save"}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditingCapture(true)}
+                className="inline-flex items-center gap-1 rounded-full border border-[hsl(var(--border))] px-3 py-1 text-[10px] uppercase tracking-[0.16em]"
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
+            )}
+          >
             <InfoRow label="Taken" value={formatDate(asset.temporal?.best_timestamp)} />
             <InfoRow label="Date source" value={asset.temporal?.source ?? "—"} />
             <InfoRow label="File size" value={formatBytes(asset.file_size_bytes)} />
             <InfoRow label="Dimensions" value={asset.media_info?.width && asset.media_info?.height ? `${asset.media_info.width} x ${asset.media_info.height}` : "—"} />
-            <InfoRow label="Place" value={asset.place_candidates[0]?.name ?? "—"} />
-            <InfoRow label="GPS" value={asset.location?.lat != null ? `${asset.location.lat.toFixed(5)}, ${asset.location.lon?.toFixed(5) ?? "—"}` : "—"} />
+            {editingCapture ? (
+              <>
+                <FieldRow
+                  label="Place"
+                  value={captureForm.place}
+                  onChange={(value) => setCaptureForm((prev) => ({ ...prev, place: value }))}
+                  placeholder="Add place context for the next AI run"
+                />
+                <FieldRow
+                  label="GPS"
+                  value={captureForm.gps_coords}
+                  onChange={(value) => setCaptureForm((prev) => ({ ...prev, gps_coords: value }))}
+                  placeholder="48.14573, 11.58769"
+                />
+                <TextAreaRow
+                  label="Comments"
+                  value={captureForm.comments}
+                  onChange={(value) => setCaptureForm((prev) => ({ ...prev, comments: value }))}
+                  placeholder="Add archive notes or scene context for the next AI run"
+                />
+              </>
+            ) : (
+              <>
+                <InfoRow label="Place" value={displayPlace} />
+                <InfoRow label="GPS" value={displayGps} />
+                <InfoRow label="Comments" value={displayComments} />
+              </>
+            )}
             <InfoRow label="Camera" value={[asset.media_info?.camera_make, asset.media_info?.camera_model].filter(Boolean).join(" ") || "—"} />
             <InfoRow label="Lens" value={asset.media_info?.lens_model ?? "—"} />
             <InfoRow label="Path" value={folderPath} mono />
+            {captureError ? (
+              <div className="mt-3 rounded-[1rem] bg-[hsl(var(--surface-raised))] p-3 text-[12px] text-red-500">
+                {captureError}
+              </div>
+            ) : null}
           </Panel>
 
           <Panel title="AI run" icon={<Sparkles size={14} />}>
@@ -315,12 +581,15 @@ export default function AssetDetailPage() {
   );
 }
 
-function Panel({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Panel({ title, icon, children, className, actions }: { title: string; icon: React.ReactNode; children: React.ReactNode; className?: string; actions?: React.ReactNode }) {
   return (
-    <section className="rounded-[1.6rem] border border-[hsl(var(--border))] bg-[hsl(var(--surface))] p-4 shadow-[0_24px_80px_-66px_rgba(0,0,0,0.45)]">
-      <div className="mb-3 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[hsl(var(--muted))]">
-        {icon}
-        <span>{title}</span>
+    <section className={cn("rounded-[1.6rem] border border-[hsl(var(--border))] bg-[hsl(var(--surface))] p-4 shadow-[0_24px_80px_-66px_rgba(0,0,0,0.45)]", className)}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[hsl(var(--muted))]">
+          {icon}
+          <span>{title}</span>
+        </div>
+        {actions}
       </div>
       {children}
     </section>
@@ -332,6 +601,35 @@ function InfoRow({ label, value, mono = false }: { label: string; value: React.R
     <div className="flex items-start justify-between gap-3 border-b border-[hsl(var(--border-subtle))] py-2 last:border-b-0">
       <span className="text-[11px] uppercase tracking-[0.14em] text-[hsl(var(--muted))]">{label}</span>
       <span className={cn("max-w-[65%] text-right text-[12px] text-[hsl(var(--foreground))]", mono && "font-mono text-[11px] break-all")}>{value}</span>
+    </div>
+  );
+}
+
+function FieldRow({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-[hsl(var(--border-subtle))] py-2">
+      <span className="pt-2 text-[11px] uppercase tracking-[0.14em] text-[hsl(var(--muted))]">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-[65%] rounded-[0.9rem] border border-[hsl(var(--border))] bg-[hsl(var(--surface-raised))] px-3 py-2 text-right text-[12px] text-[hsl(var(--foreground))] outline-none"
+      />
+    </div>
+  );
+}
+
+function TextAreaRow({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-[hsl(var(--border-subtle))] py-2">
+      <span className="pt-2 text-[11px] uppercase tracking-[0.14em] text-[hsl(var(--muted))]">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        rows={4}
+        className="w-[65%] resize-y rounded-[0.9rem] border border-[hsl(var(--border))] bg-[hsl(var(--surface-raised))] px-3 py-2 text-[12px] text-[hsl(var(--foreground))] outline-none"
+      />
     </div>
   );
 }

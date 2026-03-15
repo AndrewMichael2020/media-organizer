@@ -127,6 +127,9 @@ class AssetDetail(BaseModel):
     tag_details: list[TagInfo] = []
     artistic_notes: "ArtisticNotesInfo | None" = None
     extraction_notes: str | None = None
+    analysis: dict | None = None
+    location_meta: "LocationMetaInfo | None" = None
+    user_context: "UserContextInfo | None" = None
     series: "SeriesInfo | None" = None
     extraction_status: str | None = None
     extraction_run: "ExtractionRunInfo | None" = None
@@ -157,6 +160,23 @@ class ArtisticNotesInfo(BaseModel):
     resolution: str | None = None
 
 
+class LocationMetaInfo(BaseModel):
+    place_name_candidate: str | None = None
+    nearest_city_candidate: str | None = None
+    province_or_state_candidate: str | None = None
+    country_candidate: str | None = None
+    location_source: str = "unknown"
+    location_precision: str = "unknown"
+    location_confidence: str = "low"
+    location_evidence: list[str] = []
+
+
+class UserContextInfo(BaseModel):
+    place: str | None = None
+    gps_coords: str | None = None
+    comments: str | None = None
+
+
 class SeriesItem(BaseModel):
     id: str
     filename: str
@@ -185,6 +205,12 @@ class ResetMetadataRequest(BaseModel):
 class ResetMetadataResponse(BaseModel):
     folder_path: str
     asset_count: int
+
+
+class UpdateUserContextRequest(BaseModel):
+    place: str | None = None
+    gps_coords: str | None = None
+    comments: str | None = None
 
 
 class ReviewQueueItem(BaseModel):
@@ -241,18 +267,24 @@ def _tags_for_asset(asset, run=None, scene=None, ocr=None, places=None, objects=
 
     tags: list[str] = []
     raw = run.raw_output if run and isinstance(run.raw_output, dict) else {}
-    for tag in raw.get("search_tags") or []:
-        if isinstance(tag, str):
-            cleaned = tag.strip().lower()
-            if cleaned and cleaned not in tags:
-                tags.append(cleaned)
-    for value in [
-        scene.setting if scene else None,
-        scene.time_of_day if scene else None,
-        scene.weather if scene else None,
-        places[0].name if places else None,
-        places[0].region if places else None,
-    ]:
+    summary = raw.get("image_summary") if isinstance(raw.get("image_summary"), dict) else {}
+    setting_analysis = raw.get("setting_analysis") if isinstance(raw.get("setting_analysis"), dict) else {}
+    operational = raw.get("operational_context") if isinstance(raw.get("operational_context"), dict) else {}
+    landscape = raw.get("landscape_analysis") if isinstance(raw.get("landscape_analysis"), dict) else {}
+
+    candidate_values = [
+        summary.get("primary_scene"),
+        summary.get("time_of_day"),
+        *list(summary.get("secondary_scenes") or []),
+        *list(summary.get("location_cues") or []),
+        *list(setting_analysis.get("visible_logos") or []),
+        *list(setting_analysis.get("visible_insignia") or []),
+        *list(setting_analysis.get("organization_text_cues") or []),
+        landscape.get("terrain_type"),
+        landscape.get("weather_visibility_cues"),
+        *list(operational.get("damage_indicators") or []),
+    ]
+    for value in candidate_values:
         if value:
             cleaned = str(value).strip().lower()
             if cleaned not in tags:
@@ -276,23 +308,28 @@ def _tag_details_for_run(run, scene=None, places=None, objects=None) -> list[Tag
     raw = run.raw_output if run and isinstance(run.raw_output, dict) else {}
     items: list[TagInfo] = []
     seen: set[str] = set()
+    confidence_map = {"high": 0.92, "medium": 0.76, "low": 0.52, "unknown": None}
+    summary = raw.get("image_summary") if isinstance(raw.get("image_summary"), dict) else {}
+    setting_analysis = raw.get("setting_analysis") if isinstance(raw.get("setting_analysis"), dict) else {}
+    operational = raw.get("operational_context") if isinstance(raw.get("operational_context"), dict) else {}
+    landscape = raw.get("landscape_analysis") if isinstance(raw.get("landscape_analysis"), dict) else {}
 
-    for tag in raw.get("search_tag_details") or []:
-        if not isinstance(tag, dict):
-            continue
-        label = str(tag.get("label") or "").strip().lower()
-        if not label or label in seen:
-            continue
-        confidence = tag.get("confidence")
-        items.append(TagInfo(label=label, confidence=confidence if isinstance(confidence, (int, float)) else None))
-        seen.add(label)
+    structured_tags: list[tuple[str, float | None]] = []
+    for value in (
+        [summary.get("primary_scene"), summary.get("time_of_day"), landscape.get("terrain_type"), landscape.get("weather_visibility_cues")]
+        + list(summary.get("secondary_scenes") or [])
+        + list(summary.get("location_cues") or [])
+        + list(setting_analysis.get("visible_logos") or [])
+        + list(setting_analysis.get("visible_insignia") or [])
+        + list(setting_analysis.get("organization_text_cues") or [])
+        + list(operational.get("damage_indicators") or [])
+    ):
+        if isinstance(value, str):
+            structured_tags.append((value.strip().lower(), confidence_map.get(summary.get("confidence"))))
 
-    for tag in raw.get("search_tags") or []:
-        if not isinstance(tag, str):
-            continue
-        label = tag.strip().lower()
+    for label, confidence in structured_tags:
         if label and label not in seen:
-            items.append(TagInfo(label=label, confidence=None))
+            items.append(TagInfo(label=label, confidence=confidence))
             seen.add(label)
 
     fallback_values = [
@@ -319,8 +356,9 @@ def _tag_details_for_run(run, scene=None, places=None, objects=None) -> list[Tag
 
 def _summary_for_asset(run, scene, places, objects) -> str | None:
     raw = run.raw_output if run and isinstance(run.raw_output, dict) else {}
-    if isinstance(raw.get("short_summary"), str) and raw.get("short_summary").strip():
-        return _clean_summary_text(raw["short_summary"].strip())
+    image_summary = raw.get("image_summary") if isinstance(raw.get("image_summary"), dict) else {}
+    if isinstance(image_summary.get("strict_caption"), str) and image_summary.get("strict_caption").strip():
+        return _clean_summary_text(image_summary["strict_caption"].strip())
     parts = []
     if scene and scene.description:
         parts.append(scene.description.split(".")[0].strip())
@@ -380,24 +418,138 @@ def _normalized_objects(objs) -> list[ObjectInfo]:
 
 def _artistic_notes(run) -> ArtisticNotesInfo | None:
     raw = run.raw_output if run and isinstance(run.raw_output, dict) else {}
-    notes = raw.get("artistic_notes")
+    notes = raw.get("quality_review") if isinstance(raw.get("quality_review"), dict) else None
     if not isinstance(notes, dict):
         return None
     return ArtisticNotesInfo(
-        summary=notes.get("summary"),
-        composition=notes.get("composition"),
-        lighting=notes.get("lighting"),
-        detail=notes.get("detail"),
-        resolution=notes.get("resolution"),
+        summary=_norm_phrase(f"Quality: {notes.get('image_quality')}" if notes.get("image_quality") else None),
+        composition=_norm_phrase(f"Framing: {notes.get('framing')}" if notes.get("framing") else None),
+        lighting=None,
+        detail=_norm_phrase(f"Occlusion: {notes.get('occlusion_level')}" if notes.get("occlusion_level") else None),
+        resolution=_norm_phrase("; ".join(notes.get("limitations") or []) if notes.get("limitations") else None),
     )
 
 
 def _extraction_notes(run) -> str | None:
     raw = run.raw_output if run and isinstance(run.raw_output, dict) else {}
-    notes = raw.get("extraction_notes")
-    if isinstance(notes, str) and notes.strip():
-        return notes.strip()
+    quality = raw.get("quality_review") if isinstance(raw.get("quality_review"), dict) else {}
+    limitations = quality.get("limitations") if isinstance(quality, dict) else []
+    if limitations:
+        return "Limits: " + ", ".join(str(item) for item in limitations[:4])
     return None
+
+
+def _norm_phrase(value: str | None) -> str | None:
+    if not value or not isinstance(value, str):
+        return None
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    return cleaned or None
+
+
+def _user_context_for_asset(session, asset_id: str) -> UserContextInfo | None:
+    from sqlalchemy import select as sa_select
+    from models import Assertion
+
+    rows = session.scalars(
+        sa_select(Assertion)
+        .where(
+            Assertion.asset_id == asset_id,
+            Assertion.is_active == True,  # noqa: E712
+            Assertion.predicate.in_(["user.place", "user.gps_coords", "user.comments"]),
+        )
+        .order_by(Assertion.created_at.desc())
+    ).all()
+
+    values: dict[str, str | None] = {"place": None, "gps_coords": None, "comments": None}
+    for row in rows:
+        key = row.predicate.replace("user.", "", 1)
+        if key in values and values[key] is None:
+            values[key] = _norm_phrase(row.value)
+
+    if not any(values.values()):
+        return None
+    return UserContextInfo(**values)
+
+
+def _location_meta(asset, run, ocr_text: str | None, places: list[PlaceInfo]) -> LocationMetaInfo | None:
+    raw = run.raw_output if run and isinstance(run.raw_output, dict) else {}
+    image_summary = raw.get("image_summary") if isinstance(raw.get("image_summary"), dict) else {}
+    model_location_meta = raw.get("location_meta") if isinstance(raw.get("location_meta"), dict) else {}
+    location_cues = [str(item).strip() for item in image_summary.get("location_cues") or [] if str(item).strip()]
+    best_place = max(places, key=lambda item: item.confidence or 0, default=None)
+    evidence: list[str] = [str(item).strip() for item in model_location_meta.get("location_evidence") or [] if str(item).strip()]
+
+    place_name_candidate = _norm_phrase(model_location_meta.get("place_name_candidate"))
+    nearest_city_candidate = _norm_phrase(model_location_meta.get("nearest_city_candidate"))
+    province_candidate = _norm_phrase(model_location_meta.get("province_or_state_candidate"))
+    country_candidate = _norm_phrase(model_location_meta.get("country_candidate"))
+    location_source = str(model_location_meta.get("location_source") or "unknown")
+    location_precision = str(model_location_meta.get("location_precision") or "unknown")
+    location_confidence = str(model_location_meta.get("location_confidence") or "low")
+
+    if asset.location and asset.location.lat is not None and asset.location.lon is not None:
+        evidence.append("embedded coordinates available")
+        if location_source == "unknown":
+            location_source = "embedded_metadata"
+        if location_confidence == "low":
+            location_confidence = "medium"
+
+    if best_place:
+        if best_place.name and not place_name_candidate:
+            place_name_candidate = best_place.name
+        if best_place.place_type in {"city", "town"} and best_place.name and not nearest_city_candidate:
+            nearest_city_candidate = best_place.name
+        if best_place.region and not province_candidate:
+            province_candidate = best_place.region
+        if best_place.country and not country_candidate:
+            country_candidate = best_place.country
+
+        if ocr_text and best_place.name and best_place.name.lower() in ocr_text.lower():
+            location_source = "combined" if location_source != "unknown" else "ocr_text"
+            evidence.append("place cue also appears in visible text")
+            location_confidence = "high" if asset.location else "medium"
+        elif best_place.source == "gps":
+            location_source = "embedded_metadata"
+            evidence.append("place candidate linked to coordinate-derived record")
+            location_confidence = "high"
+        elif best_place.source == "ai":
+            if location_source == "embedded_metadata":
+                location_source = "combined"
+                evidence.append("visual place cue aligned with embedded coordinates")
+                location_confidence = "high"
+            else:
+                location_source = "landmark_visual_inference"
+                evidence.append("candidate place inferred from visible landmark or scene cues")
+                location_confidence = "medium" if (best_place.confidence or 0) >= 0.85 else "low"
+
+        if location_precision == "unknown" and place_name_candidate:
+            location_precision = "site_level" if best_place.place_type not in {"city", "town"} else "city_level"
+        elif location_precision == "unknown" and nearest_city_candidate:
+            location_precision = "city_level"
+        elif location_precision == "unknown" and province_candidate:
+            location_precision = "province_or_state_level"
+        elif location_precision == "unknown" and country_candidate:
+            location_precision = "country_level"
+
+    if not best_place and location_cues:
+        location_source = "landmark_visual_inference" if location_source == "unknown" else location_source
+        location_precision = "place_type_only" if location_precision == "unknown" else location_precision
+        location_confidence = "low" if location_confidence == "low" else location_confidence
+        evidence.extend(location_cues[:4])
+
+    if not evidence and not any([place_name_candidate, nearest_city_candidate, province_candidate, country_candidate]):
+        return None
+
+    return LocationMetaInfo(
+        place_name_candidate=place_name_candidate,
+        nearest_city_candidate=nearest_city_candidate,
+        province_or_state_candidate=province_candidate,
+        country_candidate=country_candidate,
+        location_source=location_source,
+        location_precision=location_precision,
+        location_confidence=location_confidence,
+        location_evidence=list(dict.fromkeys(evidence))[:5],
+    )
 
 
 def _confidence_label(value: float | None) -> str | None:
@@ -716,6 +868,9 @@ async def get_asset_detail(asset_id: str) -> AssetDetail:
         artistic_notes = None
         extraction_notes = None
         extraction_status = None
+        analysis = None
+        location_meta = None
+        user_context = _user_context_for_asset(session, asset_id)
 
         extraction_run = None
         if run:
@@ -772,6 +927,8 @@ async def get_asset_detail(asset_id: str) -> AssetDetail:
             tag_details = _tag_details_for_run(run, scene, places, objects)
             artistic_notes = _artistic_notes(run)
             extraction_notes = _extraction_notes(run)
+            analysis = run.raw_output if isinstance(run.raw_output, dict) else None
+            location_meta = _location_meta(asset, run, ocr_text, places)
         else:
             # Check if extraction was attempted but failed
             any_run = session.scalar(
@@ -856,10 +1013,73 @@ async def get_asset_detail(asset_id: str) -> AssetDetail:
             tag_details=tag_details,
             artistic_notes=artistic_notes,
             extraction_notes=extraction_notes,
+            analysis=analysis,
+            location_meta=location_meta,
+            user_context=user_context,
             series=series,
             extraction_status=extraction_status,
             extraction_run=extraction_run,
         )
+
+
+@router.post("/{asset_id}/user-context", response_model=UserContextInfo)
+async def update_asset_user_context(asset_id: str, body: UpdateUserContextRequest) -> UserContextInfo:
+    import uuid as _uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import select as sa_select
+    from models import Asset, Assertion
+
+    try:
+        _uuid.UUID(asset_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    normalized = {
+        "user.place": _norm_phrase(body.place),
+        "user.gps_coords": _norm_phrase(body.gps_coords),
+        "user.comments": _norm_phrase(body.comments),
+    }
+
+    with get_session() as session:
+        asset = session.get(Asset, asset_id)
+        if not asset:
+            raise HTTPException(status_code=404, detail="Asset not found")
+
+        existing = session.scalars(
+            sa_select(Assertion).where(
+                Assertion.asset_id == asset_id,
+                Assertion.is_active == True,  # noqa: E712
+                Assertion.predicate.in_(list(normalized.keys())),
+            )
+        ).all()
+        for row in existing:
+            row.is_active = False
+
+        now = datetime.now(timezone.utc)
+        for predicate, value in normalized.items():
+            if not value:
+                continue
+            session.add(
+                Assertion(
+                    asset_id=asset_id,
+                    predicate=predicate,
+                    value=value,
+                    confidence=1.0,
+                    source="user",
+                    extraction_run_id=None,
+                    superseded_by=None,
+                    is_active=True,
+                    user_verified=True,
+                    created_at=now,
+                )
+            )
+        session.commit()
+
+    return UserContextInfo(
+        place=normalized["user.place"],
+        gps_coords=normalized["user.gps_coords"],
+        comments=normalized["user.comments"],
+    )
 
 
 @router.get("/review/queues", response_model=ReviewQueueResponse)

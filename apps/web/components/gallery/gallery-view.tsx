@@ -162,7 +162,7 @@ export function GalleryView() {
           <div className="space-y-2">
             <p className="text-[10px] uppercase tracking-[0.34em] text-[hsl(var(--muted))]">Archive gallery</p>
             <h2 className="max-w-4xl font-display text-[2.35rem] leading-[0.96] sm:text-[2.9rem]">
-              Search your archive by what is in the image, where it was taken, and where it lives.
+              Search your archive by what is in the image, where it was taken, and who were in it.
             </h2>
             <p className="max-w-2xl text-[12px] leading-relaxed text-[hsl(var(--muted-foreground))]">
               Use the main search, the structured fields, and the folder browser together. Cards now show summary text,
@@ -417,7 +417,8 @@ function TagPanel({
           Clear selection
         </button>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="max-h-[24rem] overflow-auto pr-1">
+        <div className="flex min-h-[18rem] flex-wrap content-start gap-2">
         {tags.length > 0 ? tags.map((tag) => (
           <button
             key={tag}
@@ -432,6 +433,7 @@ function TagPanel({
             {tag}
           </button>
         )) : <p className="text-[12px] text-[hsl(var(--muted-foreground))]">Run AI on more photos to build tag suggestions.</p>}
+        </div>
       </div>
     </div>
   );

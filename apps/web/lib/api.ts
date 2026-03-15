@@ -98,6 +98,22 @@ export interface AssetDetail {
     resolution: string | null;
   } | null;
   extraction_notes: string | null;
+  analysis: Record<string, unknown> | null;
+  user_context: {
+    place: string | null;
+    gps_coords: string | null;
+    comments: string | null;
+  } | null;
+  location_meta: {
+    place_name_candidate: string | null;
+    nearest_city_candidate: string | null;
+    province_or_state_candidate: string | null;
+    country_candidate: string | null;
+    location_source: string;
+    location_precision: string;
+    location_confidence: string;
+    location_evidence: string[];
+  } | null;
   series: {
     label: string;
     count: number;
@@ -224,6 +240,11 @@ export const api = {
     },
     get: (id: string) => apiFetch<AssetListItem>(`/assets/${id}`),
     detail: (id: string) => apiFetch<AssetDetail>(`/assets/${id}/detail`),
+    updateUserContext: (id: string, body: { place?: string | null; gps_coords?: string | null; comments?: string | null }) =>
+      apiFetch<{ place: string | null; gps_coords: string | null; comments: string | null }>(`/assets/${id}/user-context`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     reviewQueues: () => apiFetch<ReviewQueueResponse>("/assets/review/queues"),
     resetMetadata: (folder_path: string) =>
       apiFetch<{ folder_path: string; asset_count: number }>("/assets/reset-metadata", {

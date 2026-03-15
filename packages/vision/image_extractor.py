@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "db"))
 from models import (  # noqa: E402
     Asset, ExtractionRun,
     OcrDocument, ObjectDetection as DBObjectDetection,
-    SceneSummary as DBSceneSummary, PlaceCandidate as DBPlaceCandidate,
+    SceneSummary as DBSceneSummary, PlaceCandidate as DBPlaceCandidate, Assertion,
 )
 from session import get_session  # noqa: E402
 from sqlalchemy import delete as sa_delete  # noqa: E402
@@ -51,6 +51,68 @@ _COST_PER_M_OUT = 1.50  # output + thinking tokens
 
 def _calculate_cost(tokens_in: int, tokens_out: int) -> float:
     return (tokens_in * _COST_PER_M_IN + tokens_out * _COST_PER_M_OUT) / 1_000_000
+
+
+def _user_context_prompt(session: Session, asset_id: str) -> str:
+    from sqlalchemy import select as sa_select
+
+    rows = session.scalars(
+        sa_select(Assertion)
+        .where(
+            Assertion.asset_id == asset_id,
+            Assertion.is_active == True,  # noqa: E712
+            Assertion.predicate.in_(["user.place", "user.gps_coords", "user.comments"]),
+        )
+        .order_by(Assertion.created_at.desc())
+    ).all()
+
+    values: dict[str, str | None] = {"place": None, "gps_coords": None, "comments": None}
+    for row in rows:
+        key = row.predicate.replace("user.", "", 1)
+        if key in values and not values[key]:
+            cleaned = str(row.value or "").strip()
+            values[key] = cleaned or None
+
+    lines: list[str] = []
+    if values["place"]:
+        lines.append(f"- User place note: {values['place']}")
+    if values["gps_coords"]:
+        lines.append(f"- User GPS coordinates: {values['gps_coords']}")
+    if values["comments"]:
+        lines.append(f"- User comments: {values['comments']}")
+    if not lines:
+        return ""
+    return (
+        "\n\nUser-supplied archival context:\n"
+        + "\n".join(lines)
+        + "\nUse this context as optional input for place and scene interpretation. "
+          "Treat it as user-provided context, not as visual proof, and do not repeat unsupported claims."
+    )
+
+
+def _ocr_context_prompt(session: Session, asset_id: str) -> str:
+    from sqlalchemy import select as sa_select
+
+    ocr_doc = session.scalar(
+        sa_select(OcrDocument)
+        .join(ExtractionRun, ExtractionRun.id == OcrDocument.extraction_run_id)
+        .where(
+            ExtractionRun.asset_id == asset_id,
+            ExtractionRun.status == "done",
+        )
+        .order_by(ExtractionRun.started_at.desc())
+    )
+    if not ocr_doc or not ocr_doc.full_text:
+        return ""
+    text = re.sub(r"\s+", " ", ocr_doc.full_text).strip()
+    if not text:
+        return ""
+    return (
+        "\n\nOCR context from a previous archival pass:\n"
+        f"- Visible text candidate: {text[:700]}\n"
+        "Use this only as OCR input context. Prefer it when it clarifies signage, institutions, site names, "
+        "uniform text, or building text that is actually visible. Do not expand it beyond what the OCR supports."
+    )
 
 # Formats PIL can open natively
 PIL_IMAGE_EXT = {
@@ -76,6 +138,50 @@ MAX_ORIGINAL_BYTES = 8 * 1024 * 1024  # 8 MB — above this, prefer the thumbnai
 ANALYSIS_THUMB_WIDTH = 1200  # preferred thumbnail size for AI analysis
 DEFAULT_MAX_OUTPUT_TOKENS = None
 AI_DEBUG_DIR = Path(__file__).parents[2] / "var" / "ai_debug"
+
+_CONFIDENCE_MAP = {"low": "low", "medium": "medium", "med": "medium", "high": "high", "unknown": "unknown"}
+_ROLE_MAP = {
+    "marine_biologist": "research_or_fieldwork_personnel",
+    "combat_medic": "emergency_responder",
+    "alpine_guide": "coach_or_instructor",
+    "infantry_sergeant": "security_personnel",
+    "undercover_officer": "plainclothes_security_possible",
+}
+
+_ALLOWED_PRIMARY_SCENES = {
+    "urban_street", "beach", "waterfront_nonbeach", "park", "residential", "industrial_site", "healthcare",
+    "laboratory", "classroom", "conference", "office", "transit_area", "crowd_event", "checkpoint_or_security_area",
+    "damaged_built_environment", "active_conflict_or_aftermath", "emergency_response_scene", "mountain_landscape",
+    "alpine_climbing_scene", "rock_climbing_scene", "glacier_or_snowfield", "trail_or_backcountry", "other",
+}
+_ALLOWED_IMAGE_TYPE = {"candid_photo", "posed_photo", "screenshot", "surveillance_like", "scanned_document_photo", "press_photo_like", "promotional_photo_like", "unknown"}
+_ALLOWED_ENVIRONMENT = {"public", "semi_public", "private", "institutional", "commercial", "natural", "unknown"}
+_ALLOWED_INDOOR = {"indoor", "outdoor", "mixed", "unknown"}
+_ALLOWED_CROWD = {"none", "sparse", "moderate", "dense"}
+_ALLOWED_GROUP = {"alone", "pair", "small_group", "large_group", "crowd", "unknown"}
+_ALLOWED_ACTIVITY = {"walking", "waiting", "observing", "presentation", "leisure", "transit", "clinical_work", "lab_work", "security_activity", "emergency_response", "crowd_gathering", "climbing", "belaying", "scrambling", "mountaineering", "skiing_or_snow_travel", "unknown"}
+_ALLOWED_VISIBILITY = {"full_body", "upper_body", "partial_body", "face_only", "back_view", "occluded", "unknown"}
+_ALLOWED_AGE = {"child", "teen", "adult", "older_adult", "unknown"}
+_ALLOWED_POSTURE = {"standing", "sitting", "walking_posture", "crouching", "climbing_posture", "belaying_posture", "kneeling", "lying", "unknown"}
+_ALLOWED_TEXT_CONTEXT = {"signage", "badge", "uniform_text", "vehicle_marking", "placard", "storefront", "whiteboard", "document_fragment", "building_marking", "checkpoint_marking", "trail_sign", "route_marker", "equipment_label"}
+_ALLOWED_PUBLIC_PRIVATE = {"public", "semi_public", "private", "unknown", "natural"}
+_ALLOWED_ICL = {"institutional", "commercial", "leisure", "civic", "residential", "natural", "unknown"}
+_ALLOWED_ECON = {"luxury", "middle_class", "working_class_or_utilitarian", "impoverished_or_deprived", "mixed", "not_applicable", "unknown"}
+_ALLOWED_TECH = {"low", "medium", "high", "unknown"}
+_ALLOWED_LOCATION_SOURCE = {"embedded_metadata", "ocr_text", "landmark_visual_inference", "combined", "unknown"}
+_ALLOWED_LOCATION_PRECISION = {"exact_place", "site_level", "city_level", "province_or_state_level", "country_level", "place_type_only", "unknown"}
+_ALLOWED_SECURITY = {"none_visible", "low", "medium", "high", "unknown"}
+_ALLOWED_MOBILITY = {"pedestrian_flow", "vehicle_flow", "blocked_route", "controlled_access", "staging_area", "evacuation_like", "vertical_progression", "rope_protected_movement", "unknown"}
+_ALLOWED_INFRA = {"normal", "damaged", "heavily_damaged", "temporary_barriers_present", "smoke_or_fire_present", "utility_disruption_possible", "natural_terrain", "unknown"}
+_ALLOWED_TERRAIN = {"flat_urban", "beach", "forest", "trail", "talus_or_scree", "rock_wall", "alpine_ridge", "glacier", "snowfield", "mixed_mountain_terrain", "desert_or_barren", "water_edge", "unknown"}
+_ALLOWED_SLOPE = {"flat", "gentle", "steep", "very_steep", "vertical_or_near_vertical", "unknown"}
+_ALLOWED_SNOW = {"none_visible", "patchy_snow", "continuous_snow", "glacier_ice_possible", "mixed_snow_rock", "unknown"}
+_ALLOWED_WATER = {"none_visible", "lake", "river", "waterfall", "surf_or_ocean", "shoreline", "glacial_stream", "unknown"}
+_ALLOWED_VEG = {"urban", "beach_margin", "forested", "subalpine", "alpine", "barren_high_alpine", "unknown"}
+_ALLOWED_EXPOSURE = {"low", "moderate", "high", "extreme", "unknown"}
+_ALLOWED_WEATHER_VIS = {"clear", "overcast", "fog_or_cloud_obscuration", "blowing_snow_possible", "stormy_possible", "smoke_haze_possible", "unknown"}
+_ALLOWED_SEVERITY = {"low", "medium", "high"}
+_ALLOWED_FRAMING = {"close_up", "medium_shot", "wide_shot", "cropped_subject", "obstructed_view", "unknown"}
 
 
 def _load_prompt() -> str:
@@ -332,6 +438,219 @@ def _next_significant_char(text: str, start: int) -> str | None:
     return None
 
 
+def _norm_text(value: str | None, max_len: int = 220) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    return cleaned[:max_len] if cleaned else None
+
+
+def _norm_enum(value: str | None, allowed: set[str], default: str = "unknown") -> str:
+    if not isinstance(value, str):
+        return default
+    normalized = value.strip().lower().replace(" ", "_").replace("-", "_")
+    return normalized if normalized in allowed else default
+
+
+def _norm_confidence(value) -> str:
+    if isinstance(value, (int, float)):
+        if value >= 0.85:
+            return "high"
+        if value >= 0.55:
+            return "medium"
+        if value >= 0:
+            return "low"
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return _CONFIDENCE_MAP.get(normalized, "unknown")
+    return "unknown"
+
+
+def _dedupe_strings(values, cap: int, allowed: set[str] | None = None) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        if not isinstance(value, str):
+            continue
+        cleaned = value.strip().lower().replace(" ", "_").replace("-", "_")
+        if not cleaned:
+            continue
+        if allowed and cleaned not in allowed:
+            continue
+        if cleaned in seen:
+            continue
+        output.append(cleaned)
+        seen.add(cleaned)
+        if len(output) >= cap:
+            break
+    return output
+
+
+def _normalize_hypotheses(items, cap: int) -> list[dict]:
+    output: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label")
+        if not isinstance(label, str) or not label.strip():
+            continue
+        normalized_label = _ROLE_MAP.get(label.strip().lower().replace(" ", "_"), label.strip().lower().replace(" ", "_"))
+        evidence = [_norm_text(entry, 60) for entry in item.get("evidence") or []]
+        evidence = [entry for entry in evidence if entry][:5]
+        if not evidence:
+            continue
+        output.append({
+            "label": normalized_label,
+            "confidence": _norm_confidence(item.get("confidence")),
+            "evidence": evidence,
+        })
+        if len(output) >= cap:
+            break
+    return output
+
+
+def _normalize_output(output: ImageExtractionOutput) -> ImageExtractionOutput:
+    raw = output.model_dump()
+    summary = raw["image_summary"]
+    summary["strict_caption"] = _norm_text(summary.get("strict_caption"), 220)
+    summary["primary_scene"] = _norm_enum(summary.get("primary_scene"), _ALLOWED_PRIMARY_SCENES, "other")
+    summary["secondary_scenes"] = _dedupe_strings(summary.get("secondary_scenes"), 5)
+    summary["indoor_outdoor"] = _norm_enum(summary.get("indoor_outdoor"), _ALLOWED_INDOOR)
+    summary["environment_type"] = _norm_enum(summary.get("environment_type"), _ALLOWED_ENVIRONMENT)
+    summary["image_type"] = _norm_enum(summary.get("image_type"), _ALLOWED_IMAGE_TYPE)
+    summary["location_cues"] = [_norm_text(item, 60) for item in summary.get("location_cues") or []]
+    summary["location_cues"] = [item for item in summary["location_cues"] if item][:5]
+    summary["time_of_day"] = _norm_text(summary.get("time_of_day"), 40)
+    summary["season_cues"] = _dedupe_strings(summary.get("season_cues"), 4)
+    summary["historical_modernity_cues"] = [_norm_text(item, 50) for item in summary.get("historical_modernity_cues") or []]
+    summary["historical_modernity_cues"] = [item for item in summary["historical_modernity_cues"] if item][:4]
+    summary["confidence"] = _norm_confidence(summary.get("confidence"))
+
+    people_overview = raw["people_overview"]
+    people_overview["people_count_visible"] = max(0, int(people_overview.get("people_count_visible") or 0))
+    people_overview["crowd_density"] = _norm_enum(people_overview.get("crowd_density"), _ALLOWED_CROWD, "none")
+    people_overview["group_structure"] = _norm_enum(people_overview.get("group_structure"), _ALLOWED_GROUP)
+    people_overview["dominant_activity"] = _norm_enum(people_overview.get("dominant_activity"), _ALLOWED_ACTIVITY)
+    people_overview["confidence"] = _norm_confidence(people_overview.get("confidence"))
+
+    normalized_people: list[dict] = []
+    for person in raw.get("people") or []:
+        if not isinstance(person, dict):
+            continue
+        normalized_people.append({
+            "visibility": _norm_enum(person.get("visibility"), _ALLOWED_VISIBILITY),
+            "apparent_age_band": _norm_enum(person.get("apparent_age_band"), _ALLOWED_AGE),
+            "clothing_items": _dedupe_strings(person.get("clothing_items"), 8),
+            "uniform_indicators": _dedupe_strings(person.get("uniform_indicators"), 5),
+            "accessories": _dedupe_strings(person.get("accessories"), 5),
+            "posture": _norm_enum(person.get("posture"), _ALLOWED_POSTURE),
+            "actions": _dedupe_strings(person.get("actions"), 5),
+            "visible_expression_cues": _dedupe_strings(person.get("visible_expression_cues"), 4),
+            "carried_or_worn_gear": _dedupe_strings(person.get("carried_or_worn_gear"), 6),
+            "visual_signature_cues": _dedupe_strings(person.get("visual_signature_cues"), 5),
+            "role_hypotheses": _normalize_hypotheses(person.get("role_hypotheses"), 3),
+            "confidence": _norm_confidence(person.get("confidence")),
+        })
+        if len(normalized_people) >= 8:
+            break
+    raw["people"] = normalized_people
+
+    normalized_objects: list[dict] = []
+    for obj in raw.get("objects") or []:
+        if not isinstance(obj, dict):
+            continue
+        label = _norm_text(obj.get("object_label"), 60)
+        if not label:
+            continue
+        normalized_objects.append({
+            "object_label": label.lower().replace(" ", "_"),
+            "count_estimate": max(1, int(obj.get("count_estimate") or 1)),
+            "significance": _norm_enum(obj.get("significance"), {"high", "medium", "low"}, "low"),
+            "evidence": [item for item in (_norm_text(entry, 60) for entry in obj.get("evidence") or []) if item][:5],
+        })
+        if len(normalized_objects) >= 12:
+            break
+    raw["objects"] = normalized_objects
+
+    normalized_text_regions: list[dict] = []
+    for region in raw.get("text_regions") or []:
+        if not isinstance(region, dict):
+            continue
+        text = _norm_text(region.get("text"), 200)
+        if not text:
+            continue
+        normalized_text_regions.append({
+            "text": text,
+            "context": _norm_enum(region.get("context"), _ALLOWED_TEXT_CONTEXT, "signage"),
+            "confidence": _norm_confidence(region.get("confidence")),
+        })
+        if len(normalized_text_regions) >= 10:
+            break
+    raw["text_regions"] = normalized_text_regions
+
+    setting = raw["setting_analysis"]
+    setting["setting_type_hypotheses"] = _normalize_hypotheses(setting.get("setting_type_hypotheses"), 4)
+    setting["place_type_hypotheses"] = _normalize_hypotheses(setting.get("place_type_hypotheses"), 4)
+    setting["public_private"] = _norm_enum(setting.get("public_private"), _ALLOWED_PUBLIC_PRIVATE)
+    setting["institutional_commercial_leisure"] = _norm_enum(setting.get("institutional_commercial_leisure"), _ALLOWED_ICL)
+    setting["built_environment_economic_signal"] = _norm_enum(setting.get("built_environment_economic_signal"), _ALLOWED_ECON)
+    setting["technical_signal"] = _norm_enum(setting.get("technical_signal"), _ALLOWED_TECH)
+    setting["visible_logos"] = [_norm_text(item, 40) for item in setting.get("visible_logos") or []]
+    setting["visible_logos"] = [item for item in setting["visible_logos"] if item][:5]
+    setting["visible_insignia"] = [_norm_text(item, 40) for item in setting.get("visible_insignia") or []]
+    setting["visible_insignia"] = [item for item in setting["visible_insignia"] if item][:5]
+    setting["organization_text_cues"] = [_norm_text(item, 60) for item in setting.get("organization_text_cues") or []]
+    setting["organization_text_cues"] = [item for item in setting["organization_text_cues"] if item][:5]
+    setting["confidence"] = _norm_confidence(setting.get("confidence"))
+
+    location_meta = raw["location_meta"]
+    location_meta["place_name_candidate"] = _norm_text(location_meta.get("place_name_candidate"), 120)
+    location_meta["nearest_city_candidate"] = _norm_text(location_meta.get("nearest_city_candidate"), 80)
+    location_meta["province_or_state_candidate"] = _norm_text(location_meta.get("province_or_state_candidate"), 80)
+    location_meta["country_candidate"] = _norm_text(location_meta.get("country_candidate"), 80)
+    location_meta["location_source"] = _norm_enum(location_meta.get("location_source"), _ALLOWED_LOCATION_SOURCE)
+    location_meta["location_precision"] = _norm_enum(location_meta.get("location_precision"), _ALLOWED_LOCATION_PRECISION)
+    location_meta["location_confidence"] = _norm_confidence(location_meta.get("location_confidence"))
+    location_meta["location_evidence"] = [item for item in (_norm_text(entry, 70) for entry in location_meta.get("location_evidence") or []) if item][:5]
+
+    operational = raw["operational_context"]
+    operational["scene_function_hypotheses"] = _normalize_hypotheses(operational.get("scene_function_hypotheses"), 4)
+    operational["security_presence"] = _norm_enum(operational.get("security_presence"), _ALLOWED_SECURITY)
+    operational["covert_or_plainclothes_indicators"] = _dedupe_strings(operational.get("covert_or_plainclothes_indicators"), 5)
+    operational["damage_indicators"] = _dedupe_strings(operational.get("damage_indicators"), 5)
+    operational["threat_indicators"] = _dedupe_strings(operational.get("threat_indicators"), 5)
+    operational["mobility_context"] = _norm_enum(operational.get("mobility_context"), _ALLOWED_MOBILITY)
+    operational["infrastructure_status"] = _norm_enum(operational.get("infrastructure_status"), _ALLOWED_INFRA)
+    operational["confidence"] = _norm_confidence(operational.get("confidence"))
+
+    landscape = raw["landscape_analysis"]
+    landscape["terrain_type"] = _norm_enum(landscape.get("terrain_type"), _ALLOWED_TERRAIN)
+    landscape["slope_character"] = _norm_enum(landscape.get("slope_character"), _ALLOWED_SLOPE)
+    landscape["rock_type_visual_cues"] = _dedupe_strings(landscape.get("rock_type_visual_cues"), 4)
+    landscape["snow_ice_presence"] = _norm_enum(landscape.get("snow_ice_presence"), _ALLOWED_SNOW)
+    landscape["water_features"] = _norm_enum(landscape.get("water_features"), _ALLOWED_WATER)
+    landscape["vegetation_zone"] = _norm_enum(landscape.get("vegetation_zone"), _ALLOWED_VEG)
+    landscape["route_or_access_cues"] = _dedupe_strings(landscape.get("route_or_access_cues"), 5)
+    landscape["exposure_level"] = _norm_enum(landscape.get("exposure_level"), _ALLOWED_EXPOSURE)
+    landscape["weather_visibility_cues"] = _norm_enum(landscape.get("weather_visibility_cues"), _ALLOWED_WEATHER_VIS)
+    landscape["confidence"] = _norm_confidence(landscape.get("confidence"))
+
+    sensitivity = raw["sensitivity_review"]
+    sensitivity["flags"] = _dedupe_strings(sensitivity.get("flags"), 8)
+    if not sensitivity["flags"]:
+        sensitivity["flags"] = ["none"]
+    sensitivity["severity"] = _norm_enum(sensitivity.get("severity"), _ALLOWED_SEVERITY, "low")
+    sensitivity["reasons"] = [item for item in (_norm_text(entry, 60) for entry in sensitivity.get("reasons") or []) if item][:5]
+
+    quality = raw["quality_review"]
+    quality["image_quality"] = _norm_text(quality.get("image_quality"), 80)
+    quality["occlusion_level"] = _norm_text(quality.get("occlusion_level"), 60)
+    quality["framing"] = _norm_enum(quality.get("framing"), _ALLOWED_FRAMING)
+    quality["limitations"] = [item for item in (_norm_text(entry, 60) for entry in quality.get("limitations") or []) if item][:6]
+
+    return ImageExtractionOutput.model_validate(raw)
+
+
 def _persist_results(
     session: Session,
     asset: Asset,
@@ -344,58 +663,64 @@ def _persist_results(
     session.execute(sa_delete(DBObjectDetection).where(DBObjectDetection.asset_id == asset.id))
     session.execute(sa_delete(DBPlaceCandidate).where(DBPlaceCandidate.asset_id == asset.id))
 
+    ocr_text = "\n".join(region.text for region in output.text_regions if region.text).strip()
+    overall_confidence = {
+        "high": 0.92,
+        "medium": 0.76,
+        "low": 0.52,
+        "unknown": 0.35,
+    }.get(output.image_summary.confidence, 0.35)
+
     # OCR
-    if output.ocr_text:
+    if ocr_text:
         session.add(OcrDocument(
             asset_id=asset.id,
             extraction_run_id=run.id,
-            full_text=output.ocr_text,
-            confidence=output.confidence_overall,
+            full_text=ocr_text,
+            confidence=overall_confidence,
         ))
 
     # Scene
-    s = output.scene
+    s = output.image_summary
     session.add(DBSceneSummary(
         asset_id=asset.id,
         extraction_run_id=run.id,
-        scene_type=s.setting,
-        time_of_day=s.lighting,
-        weather=s.weather,
-        description=s.description,
-        confidence=output.confidence_overall,
+        scene_type=s.primary_scene,
+        setting=s.environment_type,
+        time_of_day=s.time_of_day,
+        weather=output.landscape_analysis.weather_visibility_cues,
+        description=s.strict_caption or "No caption generated.",
+        confidence=overall_confidence,
         raw=output.model_dump(),
     ))
 
     # Objects
     for obj in output.objects:
-        attrs: dict = {}
-        if obj.bbox:
-            attrs["bbox"] = obj.bbox.model_dump()
-        attrs["count"] = obj.count
-        if obj.color:
-            attrs["color"] = obj.color
-        if obj.details:
-            attrs["details"] = obj.details
+        attrs: dict = {
+            "count": obj.count_estimate,
+            "details": obj.evidence[:3],
+            "significance": obj.significance,
+        }
         session.add(DBObjectDetection(
             asset_id=asset.id,
             extraction_run_id=run.id,
-            label=obj.label,
-            confidence=obj.confidence,
+            label=obj.object_label,
+            confidence={"high": 0.9, "medium": 0.72, "low": 0.5}.get(obj.significance, 0.5),
             attributes=attrs or None,
         ))
 
     # Place candidates
-    for pc in output.place_candidates:
+    for cue in output.image_summary.location_cues[:5]:
         session.add(DBPlaceCandidate(
             asset_id=asset.id,
             extraction_run_id=run.id,
-            name=pc.name,
-            country=pc.country,
-            region=pc.region,
-            place_type=pc.place_type,
-            confidence=pc.confidence,
+            name=cue,
+            country=None,
+            region=None,
+            place_type="location_cue",
+            confidence=overall_confidence,
             source="ai",
-            raw=pc.model_dump(),
+            raw={"cue": cue, "image_summary_confidence": output.image_summary.confidence},
         ))
 
 
@@ -430,15 +755,15 @@ def extract_asset(
     raw_text = ""
     try:
         img_bytes, mime = _resolve_image_bytes(asset, path, max_px=max_px)
-        prompt = _load_prompt()
+        prompt = _load_prompt() + _ocr_context_prompt(session, asset.id) + _user_context_prompt(session, asset.id)
         effective_max_output_tokens = None if not max_output_tokens or max_output_tokens <= 0 else max_output_tokens
         result = provider.generate(prompt, img_bytes, mime, max_output_tokens=effective_max_output_tokens)
         raw_text = result.text or ""
         raw_json = _parse_json_from_response(result.text)
-        output = ImageExtractionOutput.model_validate(raw_json)
+        output = _normalize_output(ImageExtractionOutput.model_validate(raw_json))
         _write_ai_debug_dump(asset, stage="done", raw_text=raw_text, parsed_json=raw_json)
 
-        run.raw_output = raw_json
+        run.raw_output = output.model_dump()
         run.tokens_in = result.tokens_in
         run.tokens_out = result.tokens_out
         run.cost_usd = _calculate_cost(result.tokens_in, result.tokens_out)

@@ -1,56 +1,163 @@
-You are analyzing one archive image. Return a compact JSON object that matches the schema exactly.
+Analyze the attached image for archival and operational metadata extraction.
+Return JSON only and match the provided schema exactly.
+Fill the prescribed fields only.
+Prefer direct visual observations.
+Use null, unknown, or empty arrays when uncertain.
+Every hypothesis must include short visual evidence phrases.
+Use broad role labels only.
+Pay special attention to place cues, visible text, logos, insignia, equipment, barriers, damage, smoke, emergency cues, terrain, climbing or mountaineering gear, landscape type, scene function, and plainclothes or covert-security visual signatures when present.
+If OCR text is visible in the image, capture only what is readable. Do not invent text.
+If OCR context is passed separately by the pipeline, use it as supporting input for `text_regions`, `setting_analysis`, and `location_meta`, but do not expand it beyond what the text actually supports.
+Use visible text, building names, institution names, site names, distinctive uniforms, insignia, and landmark cues to fill `location_meta` cautiously as candidate fields, not hard facts.
+Only output exact place, city, province/state, or country when supported by visible text, OCR context, embedded coordinates passed through the pipeline, or an unusually strong landmark cue. Otherwise leave specific admin fields null and rely on broad visual place cues.
+Do not infer identity, nationality, ethnicity, religion, relationship status, internal emotional state, allegiance, or responsibility.
+Describe only what is visible in the image and keep the output compact.
 
 Rules:
-- Return JSON only.
-- Return one compact JSON object on a single line if possible.
-- Be brief and literal.
-- Prefer short phrases over long prose.
-- If something is unclear, leave it null or omit it where allowed.
-- OCR should include all readable text. Return null if none is readable.
-- `short_summary` must be one plain sentence, 8 to 18 words.
-- `search_tags` should contain 5 to 12 short tags when possible.
-- `search_tag_details` should contain the same important tags with a short confidence score.
-- `scene.description` must be 1 to 2 short sentences.
-- `artistic_notes` should comment briefly on composition, lighting, visible detail, and resolution.
-- `objects` should include the most useful visible subjects, up to 8.
-- For each object, include a short `color` when clearly visible and 0 to 3 short `details` such as material, clothing, brand, pose, or notable feature.
-- Avoid duplicate object entries. Merge repeated items into one object with a higher `count`.
-- `place_candidates` should include only likely matches.
-- Do not identify people by name.
+- Return one compact JSON object.
+- Use the schema fields exactly as provided.
+- Keep captions and evidence short and literal.
+- Use broad role labels only.
+- If a value is not visually supported, return unknown or an empty list.
+- Cap arrays to the most useful items only.
+- Do not invent organization names, logos, or place names without visible support.
+- Do not guess OCR beyond readable text.
+- When visible text names a building, institution, or site, prefer that text as the strongest place cue.
+- Use specific equipment or weapon labels when the object is visually distinctive enough; otherwise use a cautious generic label with `_possible` if needed.
+- Count repeated high-signal objects carefully when they are clearly visible.
+- For charged crowds, armed groups, checkpoints, or fast-moving scenes, fill `mobility_context`, `security_presence`, `scene_function_hypotheses`, and `exposure_level` from visible behavior, spacing, route openness, crowd pressure, weapon handling, and public exposure cues rather than defaulting to `unknown`.
 
 Schema:
 {
   "schema_version": "image_v1",
-  "ocr_text": string | null,
-  "short_summary": string | null,
-  "search_tags": [string],
-  "search_tag_details": [
-    { "label": string, "confidence": float }
-  ],
-  "scene": {
-    "setting": "outdoor" | "indoor" | "mixed" | null,
-    "lighting": "daylight" | "golden_hour" | "night" | "artificial" | "mixed" | null,
-    "weather": string | null,
-    "mood": string | null,
-    "primary_subject": string | null,
-    "description": string
+  "image_summary": {
+    "strict_caption": string | null,
+    "primary_scene": string,
+    "secondary_scenes": [string],
+    "indoor_outdoor": string,
+    "environment_type": string,
+    "image_type": string,
+    "location_cues": [string],
+    "time_of_day": string | null,
+    "season_cues": [string],
+    "historical_modernity_cues": [string],
+    "confidence": "low" | "medium" | "high" | "unknown"
   },
-  "artistic_notes": {
-    "summary": string | null,
-    "composition": string | null,
-    "lighting": string | null,
-    "detail": string | null,
-    "resolution": string | null
-  } | null,
+  "people_overview": {
+    "people_count_visible": int,
+    "crowd_density": string,
+    "group_structure": string,
+    "dominant_activity": string,
+    "confidence": "low" | "medium" | "high" | "unknown"
+  },
+  "people": [
+    {
+      "visibility": string,
+      "apparent_age_band": string,
+      "clothing_items": [string],
+      "uniform_indicators": [string],
+      "accessories": [string],
+      "posture": string,
+      "actions": [string],
+      "visible_expression_cues": [string],
+      "carried_or_worn_gear": [string],
+      "visual_signature_cues": [string],
+      "role_hypotheses": [
+        {
+          "label": string,
+          "confidence": "low" | "medium" | "high" | "unknown",
+          "evidence": [string]
+        }
+      ],
+      "confidence": "low" | "medium" | "high" | "unknown"
+    }
+  ],
   "objects": [
-    { "label": string, "confidence": float, "bbox": { "x": float, "y": float, "w": float, "h": float } | null, "count": int, "color": string | null, "details": [string] }
+    {
+      "object_label": string,
+      "count_estimate": int,
+      "significance": "high" | "medium" | "low",
+      "evidence": [string]
+    }
   ],
-  "place_candidates": [
-    { "name": string, "country": string | null, "region": string | null, "place_type": string | null, "confidence": float, "reasoning": string | null }
+  "text_regions": [
+    {
+      "text": string,
+      "context": string,
+      "confidence": "low" | "medium" | "high" | "unknown"
+    }
   ],
-  "person_regions": [
-    { "bbox": { "x": float, "y": float, "w": float, "h": float }, "apparent_age_group": string | null, "gender_presentation": string | null, "is_prominent": bool }
-  ],
-  "confidence_overall": float,
-  "extraction_notes": string | null
+  "setting_analysis": {
+    "setting_type_hypotheses": [
+      {
+        "label": string,
+        "confidence": "low" | "medium" | "high" | "unknown",
+        "evidence": [string]
+      }
+    ],
+    "place_type_hypotheses": [
+      {
+        "label": string,
+        "confidence": "low" | "medium" | "high" | "unknown",
+        "evidence": [string]
+      }
+    ],
+    "public_private": string,
+    "institutional_commercial_leisure": string,
+    "built_environment_economic_signal": string,
+    "technical_signal": string,
+    "visible_logos": [string],
+    "visible_insignia": [string],
+    "organization_text_cues": [string],
+    "confidence": "low" | "medium" | "high" | "unknown"
+  },
+  "location_meta": {
+    "place_name_candidate": string | null,
+    "nearest_city_candidate": string | null,
+    "province_or_state_candidate": string | null,
+    "country_candidate": string | null,
+    "location_source": "embedded_metadata" | "ocr_text" | "landmark_visual_inference" | "combined" | "unknown",
+    "location_precision": "exact_place" | "site_level" | "city_level" | "province_or_state_level" | "country_level" | "place_type_only" | "unknown",
+    "location_confidence": "low" | "medium" | "high" | "unknown",
+    "location_evidence": [string]
+  },
+  "operational_context": {
+    "scene_function_hypotheses": [
+      {
+        "label": string,
+        "confidence": "low" | "medium" | "high" | "unknown",
+        "evidence": [string]
+      }
+    ],
+    "security_presence": string,
+    "covert_or_plainclothes_indicators": [string],
+    "damage_indicators": [string],
+    "threat_indicators": [string],
+    "mobility_context": string,
+    "infrastructure_status": string,
+    "confidence": "low" | "medium" | "high" | "unknown"
+  },
+  "landscape_analysis": {
+    "terrain_type": string,
+    "slope_character": string,
+    "rock_type_visual_cues": [string],
+    "snow_ice_presence": string,
+    "water_features": string,
+    "vegetation_zone": string,
+    "route_or_access_cues": [string],
+    "exposure_level": string,
+    "weather_visibility_cues": string,
+    "confidence": "low" | "medium" | "high" | "unknown"
+  },
+  "sensitivity_review": {
+    "flags": [string],
+    "severity": "low" | "medium" | "high",
+    "reasons": [string]
+  },
+  "quality_review": {
+    "image_quality": string | null,
+    "occlusion_level": string | null,
+    "framing": string,
+    "limitations": [string]
+  }
 }
