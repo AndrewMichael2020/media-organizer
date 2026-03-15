@@ -44,13 +44,22 @@ from schemas import ImageExtractionOutput, SCHEMA_VERSION  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-# Gemini 3.1 Flash-Lite pricing (per 1M tokens)
-_COST_PER_M_IN = 0.25   # text/image input
-_COST_PER_M_OUT = 1.50  # output + thinking tokens
+_PRICING_PER_M_TOKENS: dict[tuple[str, str], tuple[float, float]] = {
+    ("gemini-2.5-flash-lite", "standard"): (0.10, 0.40),
+    ("gemini-2.5-flash-lite", "batch"): (0.05, 0.20),
+    ("gemini-3.1-flash-lite-preview", "standard"): (0.25, 1.50),
+    ("gemini-3.1-flash-lite-preview", "batch"): (0.125, 0.75),
+}
 
 
-def _calculate_cost(tokens_in: int, tokens_out: int) -> float:
-    return (tokens_in * _COST_PER_M_IN + tokens_out * _COST_PER_M_OUT) / 1_000_000
+def _calculate_cost(tokens_in: int, tokens_out: int, model_name: str, execution_mode: str = "standard") -> float:
+    rates = _PRICING_PER_M_TOKENS.get((model_name, execution_mode))
+    if rates is None:
+        base = _PRICING_PER_M_TOKENS.get((model_name, "standard"))
+        if base is None:
+            base = _PRICING_PER_M_TOKENS[("gemini-3.1-flash-lite-preview", "standard")]
+        rates = (base[0] * 0.5, base[1] * 0.5) if execution_mode == "batch" else base
+    return (tokens_in * rates[0] + tokens_out * rates[1]) / 1_000_000
 
 
 def _user_context_prompt(session: Session, asset_id: str) -> str:
@@ -134,9 +143,12 @@ PROMPT_PATH = Path(__file__).parents[2] / "prompts" / "image_v1.txt"
 
 # Resend at most this many bytes to Gemini (images are downscaled to fit)
 MAX_GEMINI_PX = 1200
+HYPER_OPTIMIZED_MAX_PX = 768
 MAX_ORIGINAL_BYTES = 8 * 1024 * 1024  # 8 MB — above this, prefer the thumbnail
 ANALYSIS_THUMB_WIDTH = 1200  # preferred thumbnail size for AI analysis
 DEFAULT_MAX_OUTPUT_TOKENS = None
+DEFAULT_JPEG_QUALITY = 85
+HYPER_OPTIMIZED_JPEG_QUALITY = 60
 AI_DEBUG_DIR = Path(__file__).parents[2] / "var" / "ai_debug"
 
 _CONFIDENCE_MAP = {"low": "low", "medium": "medium", "med": "medium", "high": "high", "unknown": "unknown"}
@@ -215,7 +227,7 @@ def _write_ai_debug_dump(
         logger.exception("Failed to write AI debug dump for %s", asset.filename)
 
 
-def _pil_to_jpeg_bytes(path: Path, max_px: int = MAX_GEMINI_PX) -> bytes:
+def _pil_to_jpeg_bytes(path: Path, max_px: int = MAX_GEMINI_PX, jpeg_quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
     """Open a PIL-readable image, downscale if needed, return JPEG bytes."""
     with Image.open(path) as img:
         img = img.convert("RGB")
@@ -224,11 +236,11 @@ def _pil_to_jpeg_bytes(path: Path, max_px: int = MAX_GEMINI_PX) -> bytes:
             ratio = max_px / max(w, h)
             img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
         buf = BytesIO()
-        img.save(buf, "JPEG", quality=85)
+        img.save(buf, "JPEG", quality=jpeg_quality)
         return buf.getvalue()
 
 
-def _apple_to_jpeg_bytes(path: Path, max_px: int = MAX_GEMINI_PX) -> bytes:
+def _apple_to_jpeg_bytes(path: Path, max_px: int = MAX_GEMINI_PX, jpeg_quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
     with NamedTemporaryFile(suffix=".jpg") as tmp:
         subprocess = __import__("subprocess")
         subprocess.run(
@@ -237,10 +249,21 @@ def _apple_to_jpeg_bytes(path: Path, max_px: int = MAX_GEMINI_PX) -> bytes:
             timeout=60,
             check=True,
         )
-        return Path(tmp.name).read_bytes()
+        if jpeg_quality >= DEFAULT_JPEG_QUALITY:
+            return Path(tmp.name).read_bytes()
+        with Image.open(tmp.name) as img:
+            img = img.convert("RGB")
+            buf = BytesIO()
+            img.save(buf, "JPEG", quality=jpeg_quality)
+            return buf.getvalue()
 
 
-def _resolve_image_bytes(asset: Asset, path: Path, max_px: int = MAX_GEMINI_PX) -> tuple[bytes, str]:
+def _resolve_image_bytes(
+    asset: Asset,
+    path: Path,
+    max_px: int = MAX_GEMINI_PX,
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+) -> tuple[bytes, str]:
     """
     Return (jpeg_bytes, mime_type) for Gemini.
 
@@ -255,14 +278,14 @@ def _resolve_image_bytes(asset: Asset, path: Path, max_px: int = MAX_GEMINI_PX) 
 
     if ext in APPLE_IMAGE_EXT and platform.system() == "Darwin":
         try:
-            return _apple_to_jpeg_bytes(path, max_px=max_px), "image/jpeg"
+            return _apple_to_jpeg_bytes(path, max_px=max_px, jpeg_quality=jpeg_quality), "image/jpeg"
         except Exception as exc:
             logger.warning("sips failed on %s (%s), falling back", path.name, exc)
 
     if not is_raw and not is_large:
         # Happy path: PIL-readable, reasonably sized
         try:
-            return _pil_to_jpeg_bytes(path, max_px=max_px), "image/jpeg"
+            return _pil_to_jpeg_bytes(path, max_px=max_px, jpeg_quality=jpeg_quality), "image/jpeg"
         except Exception as exc:
             logger.warning("PIL failed on %s (%s), falling back to thumbnail", path.name, exc)
 
@@ -278,7 +301,7 @@ def _resolve_image_bytes(asset: Asset, path: Path, max_px: int = MAX_GEMINI_PX) 
             return thumb_path.read_bytes(), "image/jpeg"
 
     # No thumbnail — try PIL anyway (last resort)
-    return _pil_to_jpeg_bytes(path, max_px=max_px), "image/jpeg"
+    return _pil_to_jpeg_bytes(path, max_px=max_px, jpeg_quality=jpeg_quality), "image/jpeg"
 
 
 def _parse_json_from_response(text: str) -> dict:
@@ -724,6 +747,36 @@ def _persist_results(
         ))
 
 
+def _batch_state_name(value) -> str:
+    text = str(value or "").strip().lower()
+    if "." in text:
+        text = text.split(".")[-1]
+    return text
+
+
+def _batch_done(state) -> bool:
+    name = _batch_state_name(state)
+    return any(token in name for token in ("succeeded", "failed", "cancelled", "canceled"))
+
+
+def _batch_succeeded(state) -> bool:
+    return "succeeded" in _batch_state_name(state)
+
+
+def _build_extraction_run(asset: Asset, provider_name: str, model_name: str, execution_mode: str) -> ExtractionRun:
+    stored_model_name = model_name if execution_mode == "standard" else f"{model_name} + batch"
+    return ExtractionRun(
+        asset_id=asset.id,
+        run_type="image",
+        model_provider=provider_name,
+        model_name=stored_model_name,
+        schema_version=SCHEMA_VERSION,
+        prompt_version="image_v1",
+        status="running",
+        started_at=datetime.now(timezone.utc),
+    )
+
+
 def extract_asset(
     asset: Asset,
     session: Session,
@@ -731,18 +784,11 @@ def extract_asset(
     *,
     max_px: int = MAX_GEMINI_PX,
     max_output_tokens: int | None = DEFAULT_MAX_OUTPUT_TOKENS,
+    execution_mode: str = "standard",
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
 ) -> ExtractionRun:
     """Run AI extraction for a single asset. Creates an ExtractionRun record."""
-    run = ExtractionRun(
-        asset_id=asset.id,
-        run_type="image",
-        model_provider=provider.provider_name,
-        model_name=provider.model_name,
-        schema_version=SCHEMA_VERSION,
-        prompt_version="image_v1",
-        status="running",
-        started_at=datetime.now(timezone.utc),
-    )
+    run = _build_extraction_run(asset, provider.provider_name, provider.model_name, execution_mode)
     session.add(run)
     session.flush()
 
@@ -754,7 +800,7 @@ def extract_asset(
 
     raw_text = ""
     try:
-        img_bytes, mime = _resolve_image_bytes(asset, path, max_px=max_px)
+        img_bytes, mime = _resolve_image_bytes(asset, path, max_px=max_px, jpeg_quality=jpeg_quality)
         prompt = _load_prompt() + _ocr_context_prompt(session, asset.id) + _user_context_prompt(session, asset.id)
         effective_max_output_tokens = None if not max_output_tokens or max_output_tokens <= 0 else max_output_tokens
         result = provider.generate(prompt, img_bytes, mime, max_output_tokens=effective_max_output_tokens)
@@ -766,7 +812,7 @@ def extract_asset(
         run.raw_output = output.model_dump()
         run.tokens_in = result.tokens_in
         run.tokens_out = result.tokens_out
-        run.cost_usd = _calculate_cost(result.tokens_in, result.tokens_out)
+        run.cost_usd = _calculate_cost(result.tokens_in, result.tokens_out, provider.model_name, execution_mode)
         run.status = "done"
         run.finished_at = datetime.now(timezone.utc)
 
@@ -807,7 +853,7 @@ def extract_all_pending(
     failure_examples: list[str] = []
 
     provider = get_provider(model_provider, model_name)
-    prompt = _load_prompt()  # validate prompt loads before touching DB
+    _load_prompt()  # validate prompt loads before touching DB
 
     with get_session() as session:
         from sqlalchemy import and_, func, or_, select
@@ -859,12 +905,210 @@ def extract_all_pending(
                 stats["skipped"] += 1
                 continue
 
-            run = extract_asset(asset, session, provider, max_px=max_px, max_output_tokens=max_output_tokens)
+            run = extract_asset(
+                asset,
+                session,
+                provider,
+                max_px=max_px,
+                max_output_tokens=max_output_tokens,
+                execution_mode="standard",
+                jpeg_quality=DEFAULT_JPEG_QUALITY,
+            )
             if run.status == "done":
                 stats["processed"] += 1
             else:
                 stats["failed"] += 1
                 if run.error_message and len(failure_examples) < 3:
+                    failure_examples.append(f"{asset.filename}: {run.error_message}")
+
+    if failure_examples:
+        stats["failure_examples"] = failure_examples
+    return stats
+
+
+def extract_all_pending_batch(
+    model_name: str = "gemini-2.5-flash-lite",
+    limit: int = 50,
+    max_px: int = HYPER_OPTIMIZED_MAX_PX,
+    max_output_tokens: int | None = DEFAULT_MAX_OUTPUT_TOKENS,
+    folder_path: str | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> dict[str, int]:
+    """Submit a Gemini Batch API extraction job and persist finished responses."""
+    stats = {"processed": 0, "failed": 0, "skipped": 0, "cancelled": 0}
+    failure_examples: list[str] = []
+
+    provider = get_provider("gemini", model_name)
+    if not hasattr(provider, "create_batch"):
+        raise RuntimeError("Selected Gemini provider does not support batch extraction")
+    _load_prompt()
+
+    with get_session() as session:
+        from sqlalchemy import func, or_, select
+
+        latest_done_subq = (
+            select(
+                ExtractionRun.asset_id.label("asset_id"),
+                func.max(func.coalesce(ExtractionRun.finished_at, ExtractionRun.started_at)).label("latest_done_at"),
+            )
+            .where(ExtractionRun.status == "done")
+            .group_by(ExtractionRun.asset_id)
+            .subquery()
+        )
+
+        stale_done_asset_ids = (
+            select(Assertion.asset_id)
+            .join(latest_done_subq, latest_done_subq.c.asset_id == Assertion.asset_id)
+            .where(
+                Assertion.is_active == True,  # noqa: E712
+                Assertion.predicate.in_(["user.place", "user.gps_coords", "user.comments"]),
+                Assertion.created_at > latest_done_subq.c.latest_done_at,
+            )
+            .distinct()
+        )
+
+        query = (
+            session.query(Asset)
+            .filter(
+                Asset.is_missing == False,  # noqa: E712
+                Asset.media_type == "photo",
+                or_(
+                    ~Asset.id.in_(select(latest_done_subq.c.asset_id)),
+                    Asset.id.in_(stale_done_asset_ids),
+                ),
+            )
+        )
+        if folder_path:
+            query = query.filter(
+                (Asset.canonical_path == folder_path) | (Asset.canonical_path.like(f"{folder_path}/%"))
+            )
+        assets = query.limit(limit).all()
+
+        batch_requests = []
+        asset_map: dict[str, Asset] = {}
+        for asset in assets:
+            if should_cancel and should_cancel():
+                stats["cancelled"] = 1
+                break
+            ext = Path(asset.canonical_path).suffix.lower()
+            if ext not in SUPPORTED_IMAGE_EXT:
+                stats["skipped"] += 1
+                continue
+            path = Path(asset.canonical_path)
+            if not path.exists():
+                stats["failed"] += 1
+                if len(failure_examples) < 3:
+                    failure_examples.append(f"{asset.filename}: File not found on disk")
+                continue
+            try:
+                img_bytes, mime = _resolve_image_bytes(
+                    asset,
+                    path,
+                    max_px=max_px,
+                    jpeg_quality=HYPER_OPTIMIZED_JPEG_QUALITY,
+                )
+                prompt = _load_prompt() + _ocr_context_prompt(session, asset.id) + _user_context_prompt(session, asset.id)
+                batch_requests.append(
+                    provider.build_batch_request(
+                        prompt=prompt,
+                        image_bytes=img_bytes,
+                        mime_type=mime,
+                        max_output_tokens=max_output_tokens,
+                        metadata={"asset_id": asset.id, "filename": asset.filename},
+                    )
+                )
+                asset_map[asset.id] = asset
+            except Exception as exc:
+                logger.exception("Failed to prepare batch request for %s", asset.id)
+                stats["failed"] += 1
+                if len(failure_examples) < 3:
+                    failure_examples.append(f"{asset.filename}: {str(exc)[:180]}")
+
+        if not batch_requests or stats["cancelled"]:
+            if failure_examples:
+                stats["failure_examples"] = failure_examples
+            return stats
+
+        batch = provider.create_batch(
+            batch_requests,
+            display_name=f"fmo-image-extract-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}",
+        )
+        batch_name = getattr(batch, "name", None)
+        if not batch_name:
+            raise RuntimeError("Gemini Batch API did not return a batch job name")
+
+        while True:
+            if should_cancel and should_cancel():
+                provider.cancel_batch(batch_name)
+                stats["cancelled"] = 1
+                break
+            batch = provider.get_batch(batch_name)
+            state = getattr(batch, "state", None)
+            if _batch_done(state):
+                break
+            import time
+            time.sleep(5)
+
+        if stats["cancelled"]:
+            if failure_examples:
+                stats["failure_examples"] = failure_examples
+            return stats
+
+        if not _batch_succeeded(getattr(batch, "state", None)):
+            error = getattr(batch, "error", None)
+            raise RuntimeError(f"Gemini batch job did not succeed: {error or getattr(batch, 'state', 'unknown')}")
+
+        inlined_responses = []
+        dest = getattr(batch, "dest", None)
+        if dest is not None:
+            inlined_responses = getattr(dest, "inlinedResponses", None) or getattr(dest, "inlined_responses", None) or []
+
+        for item in inlined_responses:
+            metadata = getattr(item, "metadata", None) or {}
+            asset_id = metadata.get("asset_id") if isinstance(metadata, dict) else None
+            if not asset_id or asset_id not in asset_map:
+                continue
+            asset = asset_map[asset_id]
+            run = _build_extraction_run(asset, "gemini", model_name, "batch")
+            session.add(run)
+            session.flush()
+            raw_text = ""
+            try:
+                if getattr(item, "error", None):
+                    raise RuntimeError(str(item.error))
+                result = provider.parse_batch_response(item)
+                raw_text = result.text or ""
+                raw_json = _parse_json_from_response(raw_text)
+                output = _normalize_output(ImageExtractionOutput.model_validate(raw_json))
+                _write_ai_debug_dump(asset, stage="done", raw_text=raw_text, parsed_json=raw_json)
+                run.raw_output = output.model_dump()
+                run.tokens_in = result.tokens_in
+                run.tokens_out = result.tokens_out
+                run.cost_usd = _calculate_cost(result.tokens_in, result.tokens_out, model_name, "batch")
+                run.status = "done"
+                run.finished_at = datetime.now(timezone.utc)
+                _persist_results(session, asset, run, output)
+                stats["processed"] += 1
+            except ValidationError as exc:
+                run.status = "failed"
+                run.error_message = f"Schema validation failed: {exc.error_count()} error(s)"
+                run.finished_at = datetime.now(timezone.utc)
+                if raw_text:
+                    run.raw_output = _failure_debug_payload(raw_text, str(exc), "schema")
+                _write_ai_debug_dump(asset, stage="schema_failed", raw_text=raw_text, error_message=str(exc))
+                stats["failed"] += 1
+                if len(failure_examples) < 3:
+                    failure_examples.append(f"{asset.filename}: {run.error_message}")
+            except Exception as exc:
+                run.status = "failed"
+                run.error_message = _summarize_parse_error(str(exc), raw_text)
+                run.finished_at = datetime.now(timezone.utc)
+                if raw_text:
+                    debug_stage = "truncated" if _looks_truncated_response(raw_text) else "parse"
+                    run.raw_output = _failure_debug_payload(raw_text, str(exc), debug_stage)
+                _write_ai_debug_dump(asset, stage="parse_failed", raw_text=raw_text, error_message=str(exc))
+                stats["failed"] += 1
+                if len(failure_examples) < 3:
                     failure_examples.append(f"{asset.filename}: {run.error_message}")
 
     if failure_examples:

@@ -156,6 +156,14 @@ Useful URLs:
 - API docs: `http://localhost:8000/docs`
 - Health check: `http://localhost:8000/health`
 
+## Shut the App Down
+
+`kill -9 $(lsof -t -i:8000 -i:3000)`
+
+Stop the db on local Docker: `docker compose down`
+
+Option: stop all processes with `pkill -f "uv run"` or `pkill -f node python`
+
 ## Typical Workflow
 
 1. Add one or more archive roots in Settings or `config/local.yaml`.
@@ -237,7 +245,7 @@ RAW support is practical but not perfect.
 
 ### HEIC / HEIF
 
-Apple image formats are supported.
+Main Apple image formats are supported.
 
 - On macOS, the app can fall back to `sips` when direct decoding is unreliable
 - If HEIC files were ingested before those fixes, rerun `reprocess` and then `extract`

@@ -162,12 +162,15 @@ export interface ConfigSnapshot {
   model_provider: string;
   model_name: string;
   lmstudio_base_url: string;
+  default_model_profile_key: string;
   model_profiles: {
     key: string;
     label: string;
     provider: string;
     model_name: string;
     kind: string;
+    execution_mode: "standard" | "batch";
+    image_max_px: number | null;
   }[];
   api_version: string;
 }
@@ -293,7 +296,7 @@ export const api = {
   jobs: {
     list: () => apiFetch<JobOut[]>("/jobs"),
     get: (id: string) => apiFetch<JobOut>(`/jobs/${id}`),
-    startIngest: (body: { type: string; source_root?: string; asset_ids?: string[]; model_provider?: string; model_name?: string }) =>
+    startIngest: (body: { type: string; source_root?: string; asset_ids?: string[]; model_provider?: string; model_name?: string; execution_mode?: "standard" | "batch" }) =>
       apiFetch<JobOut>("/jobs/ingest", { method: "POST", body: JSON.stringify(body) }),
     stop: (id: string) => apiFetch<JobOut>(`/jobs/${id}/stop`, { method: "POST" }),
     costStats: () => apiFetch<CostStats>("/jobs/extraction/cost-stats"),

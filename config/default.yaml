@@ -6,7 +6,7 @@ database:
 
 model:
   provider: "gemini"
-  name: "gemini-2.0-flash-lite"
+  name: "gemini-3.1-flash-lite-preview"
 
 lmstudio:
   base_url: "http://127.0.0.1:1234/v1"

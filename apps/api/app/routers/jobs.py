@@ -48,6 +48,7 @@ class StartJobRequest(BaseModel):
     asset_ids: list[str] | None = None
     model_provider: str | None = None
     model_name: str | None = None
+    execution_mode: str | None = None
 
 
 def _job_to_out(job) -> JobOut:
@@ -93,7 +94,8 @@ async def start_ingest(req: StartJobRequest, background_tasks: BackgroundTasks) 
     with get_session() as session:
         queued_message = f"Queued {req.type.value}"
         if req.type == JobType.extract and req.model_provider and req.model_name:
-            queued_message = f"Queued {req.type.value} with {req.model_provider}/{req.model_name}"
+            suffix = " via batch" if req.execution_mode == "batch" else ""
+            queued_message = f"Queued {req.type.value} with {req.model_provider}/{req.model_name}{suffix}"
         job = JobRun(
             job_type=req.type.value,
             status="queued",
@@ -206,7 +208,8 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
 
     running_message = f"Starting {req.type.value}…"
     if req.type == JobType.extract and req.model_provider and req.model_name:
-        running_message = f"Starting {req.type.value} with {req.model_provider}/{req.model_name}…"
+        suffix = " via batch" if req.execution_mode == "batch" else ""
+        running_message = f"Starting {req.type.value} with {req.model_provider}/{req.model_name}{suffix}…"
     _update("running", running_message)
     try:
         scoped = str(Path(req.source_root).expanduser().resolve()) if req.source_root else None
@@ -222,19 +225,30 @@ async def _run_job(job_id: str, req: StartJobRequest) -> None:
         elif req.type == JobType.extract:
             sys.path.insert(0, str(_repo / "packages" / "vision"))
             sys.path.insert(0, str(_repo / "packages" / "models"))
-            from image_extractor import extract_all_pending
+            from image_extractor import extract_all_pending, extract_all_pending_batch
             from app.core.config import settings
             await _ensure_assets_for_scope(scoped)
-            stats = await asyncio.to_thread(
-                extract_all_pending,
-                req.model_provider or settings.model_provider,
-                req.model_name or settings.model_name,
-                50,
-                settings.worker_image_analysis_max_px,
-                settings.worker_ai_max_output_tokens,
-                scoped,
-                _cancelled,
-            )
+            if req.execution_mode == "batch" and (req.model_provider or settings.model_provider) == "gemini":
+                stats = await asyncio.to_thread(
+                    extract_all_pending_batch,
+                    req.model_name or settings.model_name,
+                    50,
+                    min(settings.worker_image_analysis_max_px, 768),
+                    settings.worker_ai_max_output_tokens,
+                    scoped,
+                    _cancelled,
+                )
+            else:
+                stats = await asyncio.to_thread(
+                    extract_all_pending,
+                    req.model_provider or settings.model_provider,
+                    req.model_name or settings.model_name,
+                    50,
+                    settings.worker_image_analysis_max_px,
+                    settings.worker_ai_max_output_tokens,
+                    scoped,
+                    _cancelled,
+                )
             detail = ""
             if stats.get("failure_examples"):
                 detail = " | " + " ; ".join(stats["failure_examples"])

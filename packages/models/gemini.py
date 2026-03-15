@@ -93,3 +93,67 @@ class GeminiProvider(ModelProvider):
             tokens_in=tokens_in,
             tokens_out=tokens_out,
         )
+
+    def create_batch(
+        self,
+        requests: list[types.InlinedRequest],
+        *,
+        display_name: str | None = None,
+    ):
+        config = types.CreateBatchJobConfig(displayName=display_name) if display_name else None
+        return self._client.batches.create(
+            model=self._model,
+            src=requests,
+            config=config,
+        )
+
+    def build_batch_request(
+        self,
+        *,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+        max_output_tokens: int | None = None,
+        metadata: dict[str, str] | None = None,
+    ):
+        effective_max_output_tokens = None if not max_output_tokens or max_output_tokens <= 0 else max_output_tokens
+        return types.InlinedRequest(
+            model=self._model,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                prompt,
+            ],
+            metadata=metadata,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                responseMimeType="application/json",
+                maxOutputTokens=effective_max_output_tokens,
+            ),
+        )
+
+    def get_batch(self, name: str):
+        return self._client.batches.get(name=name)
+
+    def cancel_batch(self, name: str) -> None:
+        self._client.batches.cancel(name=name)
+
+    def parse_batch_response(self, inlined_response) -> GenerationResult:
+        response = getattr(inlined_response, "response", None)
+        if response is None:
+            raise RuntimeError("Batch response did not contain a model result")
+
+        usage = getattr(response, "usage_metadata", None) or getattr(response, "usageMetadata", None)
+        tokens_in = 0
+        tokens_out = 0
+        if usage is not None:
+            tokens_in = getattr(usage, "prompt_token_count", None) or getattr(usage, "promptTokenCount", 0) or 0
+            tokens_out = getattr(usage, "candidates_token_count", None) or getattr(usage, "candidatesTokenCount", 0) or 0
+
+        parsed = getattr(response, "parsed", None)
+        text = getattr(response, "text", "") or ""
+        if parsed is not None:
+            if hasattr(parsed, "model_dump_json"):
+                text = parsed.model_dump_json()
+            else:
+                text = json.dumps(parsed)
+        return GenerationResult(text=text, tokens_in=tokens_in, tokens_out=tokens_out)

@@ -38,7 +38,7 @@ export default function JobsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scopePath, setScopePath] = useState("");
   const [busyReset, setBusyReset] = useState(false);
-  const [selectedModelKey, setSelectedModelKey] = useState("gemini-default");
+  const [selectedModelKey, setSelectedModelKey] = useState("gemini-25-flash-lite-batch");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const jobsRef = useRef<JobOut[]>([]);
 
@@ -58,7 +58,10 @@ export default function JobsPage() {
       .then((snapshot) => {
         setCfg(snapshot);
         setSelectedModelKey((current) =>
-          current || snapshot.model_profiles[0]?.key || "gemini-default"
+          (snapshot.model_profiles.some((item) => item.key === current) ? current : "")
+          || snapshot.default_model_profile_key
+          || snapshot.model_profiles[0]?.key
+          || "gemini-25-flash-lite-batch"
         );
       })
       .catch(() => {});
@@ -97,6 +100,7 @@ export default function JobsPage() {
         source_root: scopePath.trim() || undefined,
         model_provider: type === "extract" ? selectedModel?.provider : undefined,
         model_name: type === "extract" ? selectedModel?.model_name : undefined,
+        execution_mode: type === "extract" ? selectedModel?.execution_mode : undefined,
       });
       load();
     } catch (err) {
@@ -195,7 +199,8 @@ export default function JobsPage() {
             <span className="font-medium text-[hsl(var(--foreground))]">
               {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.label ?? "the selected model"}
             </span>
-            {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.provider === "lmstudio" ? ` via ${cfg.lmstudio_base_url}` : ""}.
+            {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.provider === "lmstudio" ? ` via ${cfg.lmstudio_base_url}` : ""}
+            {cfg.model_profiles.find((item) => item.key === selectedModelKey)?.execution_mode === "batch" ? " with the Gemini Batch API and a lower-cost 768px input profile." : "."}
           </p>
         ) : null}
         {errorMessage ? (

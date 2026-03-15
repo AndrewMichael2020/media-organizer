@@ -36,6 +36,7 @@ class ConfigSnapshot(BaseModel):
     model_provider: str
     model_name: str
     lmstudio_base_url: str
+    default_model_profile_key: str
     model_profiles: list["ModelProfile"]
     api_version: str = "0.1.0"
 
@@ -46,6 +47,8 @@ class ModelProfile(BaseModel):
     provider: str
     model_name: str
     kind: str
+    execution_mode: str = "standard"
+    image_max_px: int | None = None
 
 
 class PurgeMetadataRequest(BaseModel):
@@ -84,13 +87,34 @@ async def get_config() -> ConfigSnapshot:
         model_provider=settings.model_provider,
         model_name=settings.model_name,
         lmstudio_base_url=settings.lmstudio_base_url,
+        default_model_profile_key="gemini-25-flash-lite-batch",
         model_profiles=[
+            ModelProfile(
+                key="gemini-25-flash-lite-batch",
+                label="Gemini · gemini-2.5-flash-lite + Batch",
+                provider="gemini",
+                model_name="gemini-2.5-flash-lite",
+                kind="cloud",
+                execution_mode="batch",
+                image_max_px=768,
+            ),
+            ModelProfile(
+                key="gemini-25-flash-lite",
+                label="Gemini · gemini-2.5-flash-lite",
+                provider="gemini",
+                model_name="gemini-2.5-flash-lite",
+                kind="cloud",
+                execution_mode="standard",
+                image_max_px=1200,
+            ),
             ModelProfile(
                 key="gemini-default",
                 label=f"Gemini · {settings.model_name}",
                 provider=settings.model_provider,
                 model_name=settings.model_name,
                 kind="cloud",
+                execution_mode="standard",
+                image_max_px=1200,
             ),
             ModelProfile(
                 key="lmstudio-gemma-27b",
@@ -98,6 +122,8 @@ async def get_config() -> ConfigSnapshot:
                 provider="lmstudio",
                 model_name=settings.lmstudio_default_model,
                 kind="local",
+                execution_mode="standard",
+                image_max_px=1200,
             ),
             ModelProfile(
                 key="lmstudio-gemma-3n-e4b",
@@ -105,6 +131,8 @@ async def get_config() -> ConfigSnapshot:
                 provider="lmstudio",
                 model_name="google/gemma-3n-e4b",
                 kind="local",
+                execution_mode="standard",
+                image_max_px=1200,
             ),
         ],
     )
